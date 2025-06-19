@@ -1,5 +1,13 @@
 # powerlock
 
+This repository contains alternative lock implementations to help with debugging and monitoring Go applications.
+
+- **CtxRWMutex** - Context locks with timeout support
+- **MaxRWMutex** - Locks that limit the number of waiting goroutines
+- **MeteredRWMutex** - Prometheus-instrumented locks for observability
+
+## Overview
+
 A Go library providing enhanced read-write mutex implementations with advanced features for monitoring, debugging, and resource management.
 
 ## Features
@@ -41,13 +49,12 @@ if mutex.TryLock() {
 
 ### MaxRWMutex - Limited Waiter Queue
 
-A read-write mutex that limits the number of goroutines that can wait for lock acquisition, preventing resource exhaustion from excessive queueing.
+A read-write mutex that limits the number of goroutines that can wait for the lock.  Excess goroutines will be rejected immediately.
 
 **Key capabilities:**
 - Configurable maximum number of waiting goroutines
-- Fails fast when waiter limit is exceeded
+- Fails fast when wait limit is exceeded
 - Prevents system overload from unbounded lock queues
-- Standard and try-lock operations
 
 **Usage:**
 ```go
