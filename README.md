@@ -2,7 +2,7 @@
 
 This repository contains alternative lock implementations to help with debugging and monitoring Go applications.
 
-- **CtxRWMutex** - Cancellable locks that can reject all current and future waiters
+- **CancelRWMutex** - Cancellable locks that can reject all current and future waiters
 - **MaxRWMutex** - Locks that limit the number of waiting goroutines
 - **MeteredRWMutex** - Prometheus-instrumented locks for observability
 
@@ -14,7 +14,7 @@ A Go library providing enhanced read-write mutex implementations with advanced f
 
 This library offers three specialized mutex types, each addressing different concurrent programming challenges:
 
-### CtxRWMutex - Cancellable Locking
+### CancelRWMutex - Cancellable Locking
 
 A read-write mutex that can be cancelled to reject all current and future lock attempts.
 
@@ -28,7 +28,7 @@ A read-write mutex that can be cancelled to reject all current and future lock a
 ```go
 import "powerlock"
 
-mutex := ctxlock.NewCtxRWMutex("database-access")
+mutex := powerlock.NewCancelRWMutex("database-access")
 
 // Normal locking operations
 mutex.Lock()
@@ -59,7 +59,7 @@ A read-write mutex that limits the number of goroutines that can wait for the lo
 
 **Usage:**
 ```go
-mutex := ctxlock.NewMaxRWMutex("api-handler")
+mutex := powerlock.NewMaxRWMutex("api-handler")
 
 // Will fail immediately if too many goroutines are already waiting
 if mutex.TryLock() {
@@ -84,10 +84,10 @@ A read-write mutex instrumented with Prometheus metrics for observability into l
 ```go
 // Set up metrics
 reg := prometheus.NewRegistry()
-locksWaiting, locks := ctxlock.NewLockMetrics(reg)
+locksWaiting, locks := powerlock.NewLockMetrics(reg)
 
 // Create metered mutex
-mutex := ctxlock.NewMeteredRWMutex("cache-update", locksWaiting, locks)
+mutex := powerlock.NewMeteredRWMutex("cache-update", locksWaiting, locks)
 
 mutex.Lock()
 defer mutex.Unlock()
@@ -107,7 +107,7 @@ go get powerlock
 
 ## Use Cases
 
-- **CtxRWMutex**: Graceful shutdown scenarios, resource cleanup, or any situation where you need to cancel pending operations
+- **CancelRWMutex**: Graceful shutdown scenarios, resource cleanup, or any situation where you need to cancel pending operations
 - **MaxRWMutex**: High-throughput services where you want to prevent lock queue buildup
 - **MeteredRWMutex**: Production systems requiring observability into lock contention patterns
 
@@ -117,9 +117,9 @@ All mutex types implement a common interface with these methods:
 - `Lock()` / `Unlock()` - Exclusive write access
 - `RLock()` / `RUnlock()` - Shared read access  
 - `TryLock()` / `TryRLock()` - Non-blocking lock attempts
-- `CtxRWLocation(string)` - Update location label for debugging/metrics
+- `SetLocation(string)` - Update location label for debugging/metrics
 
 Each type extends this base interface with its specialized capabilities:
-- **CtxRWMutex** adds: `Cancel()` method for rejecting waiters
+- **CancelRWMutex** adds: `Cancel()` method for rejecting waiters
 - **MaxRWMutex** adds: waiter limiting behavior
 - **MeteredRWMutex** adds: automatic Prometheus metrics collection

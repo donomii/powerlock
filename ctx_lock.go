@@ -9,7 +9,7 @@
 //  CONTACT: hello@weaviate.io
 //
 
-package ctxlock
+package powerlock
 
 import (
 	"errors"
@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 )
 
-var ErrCancelled = errors.New("cancelsync: lock was cancelled")
+var ErrCancelled = errors.New("powerlock: lock was cancelled")
 
 type waiter struct {
 	done chan struct{}
@@ -42,7 +42,7 @@ func NewCancelRWMutex(location string) *CancelRWMutex {
 	}
 }
 
-func (m *CancelRWMutex) CancelRWLocation(location string) {
+func (m *CancelRWMutex) SetLocation(location string) {
 	m.location = location
 }
 
@@ -99,7 +99,7 @@ func (m *CancelRWMutex) removeWaiter(target *waiter) {
 
 func (m *CancelRWMutex) Lock() {
 	if m.isCancelled() {
-		panic("ctxsync: attempt to lock cancelled mutex")
+		panic("powerlock: attempt to lock cancelled mutex")
 	}
 	
 	select {
@@ -113,13 +113,13 @@ func (m *CancelRWMutex) Lock() {
 	
 	w := m.addWaiter(true)
 	if w == nil {
-		panic("ctxsync: attempt to lock cancelled mutex")
+		panic("powerlock: attempt to lock cancelled mutex")
 	}
 	defer m.removeWaiter(w)
 	
 	for {
 		if m.isCancelled() {
-			panic("ctxsync: mutex was cancelled while waiting")
+			panic("powerlock: mutex was cancelled while waiting")
 		}
 		
 		select {
@@ -127,7 +127,7 @@ func (m *CancelRWMutex) Lock() {
 			m.waitForReaders()
 			return
 		case <-w.done:
-			panic("ctxsync: mutex was cancelled while waiting")
+			panic("powerlock: mutex was cancelled while waiting")
 		default:
 			// Keep trying
 		}
@@ -150,7 +150,7 @@ func (m *CancelRWMutex) Unlock() {
 
 func (m *CancelRWMutex) RLock() {
 	if m.isCancelled() {
-		panic("ctxsync: attempt to lock cancelled mutex")
+		panic("powerlock: attempt to lock cancelled mutex")
 	}
 	
 	m.mu.Lock()
@@ -164,14 +164,14 @@ func (m *CancelRWMutex) RLock() {
 	
 	w := m.addWaiter(false)
 	if w == nil {
-		panic("ctxsync: attempt to lock cancelled mutex")
+		panic("powerlock: attempt to lock cancelled mutex")
 	}
 	defer m.removeWaiter(w)
 	
 	// Slow path: wait for writer to release
 	for {
 		if m.isCancelled() {
-			panic("ctxsync: mutex was cancelled while waiting")
+			panic("powerlock: mutex was cancelled while waiting")
 		}
 		
 		m.mu.Lock()
@@ -184,7 +184,7 @@ func (m *CancelRWMutex) RLock() {
 		
 		select {
 		case <-w.done:
-			panic("ctxsync: mutex was cancelled while waiting")
+			panic("powerlock: mutex was cancelled while waiting")
 		default:
 			// Keep trying
 		}

@@ -9,14 +9,14 @@
 //  CONTACT: hello@weaviate.io
 //
 
-package ctxlock
+package powerlock
 
 import (
 	"errors"
 	"sync"
 )
 
-var ErrMaxWaiting = errors.New("maxsync: too many waiting locks")
+var ErrMaxWaiting = errors.New("powerlock: too many waiting locks")
 
 // MaxRWMutex is a read/write mutex with limited waiters
 type MaxRWMutex struct {
@@ -35,7 +35,7 @@ func NewMaxRWMutex(location string) *MaxRWMutex {
 	}
 }
 
-func (m *MaxRWMutex) CtxRWLocation(location string) {
+func (m *MaxRWMutex) SetLocation(location string) {
 	m.location = location
 }
 

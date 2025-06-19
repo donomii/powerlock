@@ -9,7 +9,7 @@
 //  CONTACT: hello@weaviate.io
 //
 
-package ctxlock
+package powerlock
 
 import (
 	"sync"

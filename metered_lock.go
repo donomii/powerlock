@@ -9,9 +9,9 @@
 //  CONTACT: hello@weaviate.io
 //
 
-// Package ctxlock provides a read/write mutex with Prometheus-based metering of lock usage.
+// Package powerlock provides a read/write mutex with Prometheus-based metering of lock usage.
 // It allows observability into how many goroutines are waiting or holding a lock at specific locations.
-package ctxlock
+package powerlock
 
 import (
 	"sync"
@@ -35,8 +35,8 @@ func NewMeteredRWMutex(location string, locksWaiting *prometheus.GaugeVec, locks
 	}
 }
 
-// CtxRWLocation updates the lock location label for metric reporting.
-func (m *MeteredRWMutex) CtxRWLocation(location string) {
+// SetLocation updates the lock location label for metric reporting.
+func (m *MeteredRWMutex) SetLocation(location string) {
 	m.location = location
 }
 
