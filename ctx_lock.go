@@ -44,11 +44,14 @@ func (m *CtxRWMutex) CtxRWLocation(location string) {
 //
 
 func (m *CtxRWMutex) Lock() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.writer <- struct{}{}
 	m.waitForReaders()
 }
 
 func (m *CtxRWMutex) Unlock() {
+
 	select {
 	case <-m.writer:
 	default:
@@ -57,6 +60,9 @@ func (m *CtxRWMutex) Unlock() {
 }
 
 func (m *CtxRWMutex) LockContext(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	select {
 	case m.writer <- struct{}{}:
 		// Got writer slot
@@ -74,12 +80,6 @@ func (m *CtxRWMutex) LockContext(ctx context.Context) error {
 func (m *CtxRWMutex) RLock() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// If no writer currently holds the lock, increment readers
-	if len(m.writer) == 0 {
-		atomic.AddInt32(&m.readerCount, 1)
-		return
-	}
 
 	// Wait until writer is gone
 	for len(m.writer) > 0 {
