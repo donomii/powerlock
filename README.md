@@ -2,7 +2,7 @@
 
 This repository contains alternative lock implementations to help with debugging and monitoring Go applications.
 
-- **CtxRWMutex** - Context locks with timeout support
+- **CtxRWMutex** - Cancellable locks that can reject all current and future waiters
 - **MaxRWMutex** - Locks that limit the number of waiting goroutines
 - **MeteredRWMutex** - Prometheus-instrumented locks for observability
 
@@ -14,15 +14,15 @@ A Go library providing enhanced read-write mutex implementations with advanced f
 
 This library offers three specialized mutex types, each addressing different concurrent programming challenges:
 
-### CtxRWMutex - Context-Aware Locking
+### CtxRWMutex - Cancellable Locking
 
-A read-write mutex that supports context-based timeouts and cancellation.
+A read-write mutex that can be cancelled to reject all current and future lock attempts.
 
 **Key capabilities:**
-- Context-aware lock acquisition with timeout support
+- Cancellation support - `Cancel()` method rejects all waiters and future attempts
+- `Lock()` and `RLock()` panic when cancelled; try-methods return false
 - Non-blocking try-lock operations for both read and write locks
 - Compatible with standard `sync.RWMutex` interface
-- Prevents deadlocks through timeout mechanisms
 
 **Usage:**
 ```go
@@ -30,21 +30,22 @@ import "powerlock"
 
 mutex := ctxlock.NewCtxRWMutex("database-access")
 
-// Context-aware locking with timeout
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
-
-if err := mutex.LockContext(ctx); err != nil {
-    // Handle timeout or cancellation
-    return err
-}
+// Normal locking operations
+mutex.Lock()
 defer mutex.Unlock()
+// Critical section
 
 // Non-blocking operations
 if mutex.TryLock() {
     defer mutex.Unlock()
     // Critical section
 }
+
+// Cancel the mutex to reject all current and future waiters
+mutex.Cancel()
+// After cancellation:
+// - Lock() and RLock() will panic
+// - TryLock() and TryRLock() will return false
 ```
 
 ### MaxRWMutex - Limited Waiter Queue
@@ -106,7 +107,7 @@ go get powerlock
 
 ## Use Cases
 
-- **CtxRWMutex**: Network operations, database connections, or any scenario where you need timeout control
+- **CtxRWMutex**: Graceful shutdown scenarios, resource cleanup, or any situation where you need to cancel pending operations
 - **MaxRWMutex**: High-throughput services where you want to prevent lock queue buildup
 - **MeteredRWMutex**: Production systems requiring observability into lock contention patterns
 
@@ -118,4 +119,7 @@ All mutex types implement a common interface with these methods:
 - `TryLock()` / `TryRLock()` - Non-blocking lock attempts
 - `CtxRWLocation(string)` - Update location label for debugging/metrics
 
-Each type extends this base interface with its specialized capabilities (context support, waiter limits, or metrics collection).
+Each type extends this base interface with its specialized capabilities:
+- **CtxRWMutex** adds: `Cancel()` method for rejecting waiters
+- **MaxRWMutex** adds: waiter limiting behavior
+- **MeteredRWMutex** adds: automatic Prometheus metrics collection

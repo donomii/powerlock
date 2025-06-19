@@ -87,12 +87,17 @@ func TestMeteredRWMutex_ParallelReaders(t *testing.T) {
 
 	for i := 0; i < numReaders; i++ {
 		wg.Add(1)
-		go func() {
+		go func(id int) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("reader %d should not have panicked: %v", id, r)
+				}
+			}()
 			m.RLock()
 			time.Sleep(20 * time.Millisecond)
 			m.RUnlock()
-		}()
+		}(i)
 	}
 
 	wg.Wait()

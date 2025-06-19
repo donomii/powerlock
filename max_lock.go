@@ -54,9 +54,7 @@ func (m *MaxRWMutex) exit() {
 
 func (m *MaxRWMutex) Lock() {
 	if err := m.tryEnter(); err != nil {
-		// If non-contextual Lock is called and we're over max waiting,
-		// still block like a normal Lock.
-		m.waiting <- struct{}{}
+		panic(err)
 	}
 	m.rwlock.Lock()
 }
@@ -80,7 +78,7 @@ func (m *MaxRWMutex) Unlock() {
 
 func (m *MaxRWMutex) RLock() {
 	if err := m.tryEnter(); err != nil {
-		m.waiting <- struct{}{}
+		panic(err)
 	}
 	m.rwlock.RLock()
 }

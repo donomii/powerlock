@@ -27,7 +27,7 @@ func newTestMaxRWMutex(limit int) *MaxRWMutex {
 }
 
 func TestMaxRWMutex_BasicLockUnlock(t *testing.T) {
-	m := newTestMaxRWMutex(2)
+	m := newTestMaxRWMutex(5) // Give plenty of waiter slots
 
 	m.Lock()
 	m.Unlock()
@@ -37,7 +37,7 @@ func TestMaxRWMutex_BasicLockUnlock(t *testing.T) {
 }
 
 func TestMaxRWMutex_TryLock_Succeeds(t *testing.T) {
-	m := newTestMaxRWMutex(1)
+	m := newTestMaxRWMutex(5)
 
 	ok := m.TryLock()
 	if !ok {
@@ -47,7 +47,7 @@ func TestMaxRWMutex_TryLock_Succeeds(t *testing.T) {
 }
 
 func TestMaxRWMutex_TryLock_FailsWhenBusy(t *testing.T) {
-	m := newTestMaxRWMutex(1)
+	m := newTestMaxRWMutex(5)
 
 	m.Lock()
 	defer m.Unlock()
@@ -59,7 +59,7 @@ func TestMaxRWMutex_TryLock_FailsWhenBusy(t *testing.T) {
 }
 
 func TestMaxRWMutex_TryRLock_Succeeds(t *testing.T) {
-	m := newTestMaxRWMutex(1)
+	m := newTestMaxRWMutex(5)
 
 	ok := m.TryRLock()
 	if !ok {
@@ -69,7 +69,7 @@ func TestMaxRWMutex_TryRLock_Succeeds(t *testing.T) {
 }
 
 func TestMaxRWMutex_TryRLock_FailsWhenBusy(t *testing.T) {
-	m := newTestMaxRWMutex(1)
+	m := newTestMaxRWMutex(5)
 
 	m.Lock() // block writers and readers
 	defer m.Unlock()
@@ -80,115 +80,151 @@ func TestMaxRWMutex_TryRLock_FailsWhenBusy(t *testing.T) {
 	}
 }
 
-func TestMaxRWMutex_MaxWaitingLimits(t *testing.T) {
-	m := newTestMaxRWMutex(2) // only 2 allowed waiters
-
-	var wg sync.WaitGroup
-
-	// First goroutine: grab the lock
-	m.Lock()
-
-	// Two goroutines: waiters that should be allowed
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			m.RLock()
-			time.Sleep(50 * time.Millisecond) // hold briefly
-			m.RUnlock()
-		}()
-		time.Sleep(10 * time.Millisecond) // stagger slightly
-	}
-
-	time.Sleep(20 * time.Millisecond)
-
-	// One more waiter should exceed the limit
-	start := time.Now()
-	ok := m.TryLock()
-	if ok {
-		t.Fatal("expected TryLock to fail due to max waiting limit exceeded")
-	}
-	elapsed := time.Since(start)
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("TryLock took too long to fail: %v", elapsed)
-	}
-
-	m.Unlock()
-	wg.Wait()
-}
-
-func TestMaxRWMutex_WriterBlocksReaders(t *testing.T) {
-	m := newTestMaxRWMutex(2)
-
-	m.Lock()
-
-	start := time.Now()
-	ok := m.TryRLock()
-	if ok {
-		t.Fatal("expected TryRLock to fail while write locked")
-	}
-	elapsed := time.Since(start)
-	if elapsed > 50*time.Millisecond {
-		t.Errorf("TryRLock took too long to fail: %v", elapsed)
-	}
-
-	m.Unlock()
-}
-
 func TestMaxRWMutex_ParallelReaders(t *testing.T) {
-	m := newTestMaxRWMutex(10)
+	m := newTestMaxRWMutex(10) // Large waiter queue
 
 	const numReaders = 5
 	var wg sync.WaitGroup
 
 	for i := 0; i < numReaders; i++ {
 		wg.Add(1)
-		go func() {
+		go func(id int) {
 			defer wg.Done()
 			m.RLock()
 			time.Sleep(20 * time.Millisecond)
 			m.RUnlock()
-		}()
+		}(i)
 	}
 
-	wg.Wait()
-}
-
-func TestMaxRWMutex_TooManyWaiters(t *testing.T) {
-	m := newTestMaxRWMutex(1)
-
-	var wg sync.WaitGroup
-
-	// Take lock
-	m.Lock()
-
-	// First waiter — allowed
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		m.RLock()
-		time.Sleep(50 * time.Millisecond)
-		m.RUnlock()
-	}()
-
-	time.Sleep(10 * time.Millisecond)
-
-	// Second waiter — should be rejected
-	ok := m.TryRLock()
-	if ok {
-		t.Fatal("expected TryRLock to fail due to too many waiters")
-	}
-
-	m.Unlock()
 	wg.Wait()
 }
 
 func TestMaxRWMutex_RTLockAlias(t *testing.T) {
-	m := newTestMaxRWMutex(1)
+	m := newTestMaxRWMutex(5)
 
 	ok := m.RTryLock()
 	if !ok {
 		t.Fatal("expected RTryLock to succeed")
 	}
 	m.RUnlock()
+}
+
+// Test that Lock() panics when waiter queue is full
+func TestMaxRWMutex_Lock_PanicsWhenWaiterQueueFull(t *testing.T) {
+	m := newTestMaxRWMutex(1) // Only 1 waiter slot
+
+	// Fill the waiter queue
+	m.Lock()
+
+	// Try to add another - should panic
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected Lock() to panic when waiter queue is full")
+		}
+		if r != ErrMaxWaiting {
+			t.Fatalf("expected panic with ErrMaxWaiting, got %v", r)
+		}
+	}()
+
+	m.Lock() // This should panic immediately
+}
+
+// Test that RLock() panics when waiter queue is full  
+func TestMaxRWMutex_RLock_PanicsWhenWaiterQueueFull(t *testing.T) {
+	m := newTestMaxRWMutex(1) // Only 1 waiter slot
+
+	// Fill the waiter queue  
+	m.RLock()
+
+	// Try to add another - should panic
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected RLock() to panic when waiter queue is full")
+		}
+		if r != ErrMaxWaiting {
+			t.Fatalf("expected panic with ErrMaxWaiting, got %v", r)
+		}
+	}()
+
+	m.RLock() // This should panic immediately
+}
+
+// Test that TryLock returns false when waiter queue is full
+func TestMaxRWMutex_TryLock_FailsWhenWaiterQueueFull(t *testing.T) {
+	m := newTestMaxRWMutex(1) // Only 1 waiter slot
+
+	// Fill the waiter queue
+	m.Lock()
+	defer m.Unlock()
+
+	// Try to add another with TryLock - should return false
+	ok := m.TryLock()
+	if ok {
+		m.Unlock() // cleanup if somehow succeeded
+		t.Fatal("expected TryLock to fail when waiter queue is full")
+	}
+}
+
+// Test that TryRLock returns false when waiter queue is full
+func TestMaxRWMutex_TryRLock_FailsWhenWaiterQueueFull(t *testing.T) {
+	m := newTestMaxRWMutex(1) // Only 1 waiter slot
+
+	// Fill the waiter queue
+	m.RLock()
+	defer m.RUnlock()
+
+	// Try to add another with TryRLock - should return false  
+	ok := m.TryRLock()
+	if ok {
+		m.RUnlock() // cleanup if somehow succeeded
+		t.Fatal("expected TryRLock to fail when waiter queue is full")
+	}
+}
+
+// Test multiple operations with larger waiter queue
+func TestMaxRWMutex_MultipleOperationsWithLimitedQueue(t *testing.T) {
+	m := newTestMaxRWMutex(3) // Allow 3 waiters
+
+	// First operation: read lock (takes one slot and succeeds)
+	m.RLock()
+
+	// Second operation: another read lock should succeed (takes second slot, readers can share)
+	ok := m.TryRLock()
+	if !ok {
+		t.Fatal("expected second TryRLock to succeed - readers should be able to share")
+	}
+
+	// Third operation: another read lock should succeed (takes third slot, readers can share)
+	ok2 := m.TryRLock()
+	if !ok2 {
+		t.Fatal("expected third TryRLock to succeed - readers should be able to share")
+	}
+
+	// Fourth operation: should fail (queue full)
+	ok3 := m.TryLock()
+	if ok3 {
+		m.Unlock()
+		t.Fatal("expected fourth TryLock to fail due to full waiter queue")
+	}
+
+	// Fifth operation: should fail (queue full)
+	ok4 := m.TryRLock()
+	if ok4 {
+		m.RUnlock()
+		t.Fatal("expected fifth TryRLock to fail due to full waiter queue")
+	}
+
+	// Clean up all read locks
+	m.RUnlock() // third operation
+	m.RUnlock() // second operation
+	m.RUnlock() // first operation
+
+	// Now operations should succeed again
+	ok5 := m.TryLock()
+	if !ok5 {
+		t.Fatal("expected TryLock to succeed after queue cleared")
+	}
+	m.Unlock()
 }

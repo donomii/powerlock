@@ -12,46 +12,129 @@
 package ctxlock
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
 )
 
-var ErrCtxTimeout = errors.New("ctxsync: lock acquisition timed out")
+var ErrCancelled = errors.New("cancelsync: lock was cancelled")
 
-type CtxRWMutex struct {
+type waiter struct {
+	done chan struct{}
+	isWriter bool
+}
+
+type CancelRWMutex struct {
 	location string
 
 	readerCount int32         // number of active readers
 	writer      chan struct{} // single-slot semaphore for writers
-	mu          sync.Mutex    // protects coordination
+	mu          sync.Mutex    // protects coordination and waiters list
+	cancelled   int32         // atomic flag for cancellation state
+	waiters     []*waiter     // list of waiting goroutines
 }
 
-func NewCtxRWMutex(location string) *CtxRWMutex {
-	return &CtxRWMutex{
+func NewCancelRWMutex(location string) *CancelRWMutex {
+	return &CancelRWMutex{
 		location: location,
 		writer:   make(chan struct{}, 1),
+		waiters:  make([]*waiter, 0),
 	}
 }
 
-func (m *CtxRWMutex) CtxRWLocation(location string) {
+func (m *CancelRWMutex) CancelRWLocation(location string) {
 	m.location = location
+}
+
+func (m *CancelRWMutex) isCancelled() bool {
+	return atomic.LoadInt32(&m.cancelled) == 1
+}
+
+// Cancel marks this mutex as cancelled and rejects all current and future waiters
+func (m *CancelRWMutex) Cancel() {
+	atomic.StoreInt32(&m.cancelled, 1)
+	
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	// Notify all waiting goroutines
+	for _, w := range m.waiters {
+		close(w.done)
+	}
+	m.waiters = m.waiters[:0] // Clear the slice
+}
+
+func (m *CancelRWMutex) addWaiter(isWriter bool) *waiter {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	if m.isCancelled() {
+		return nil
+	}
+	
+	w := &waiter{
+		done: make(chan struct{}),
+		isWriter: isWriter,
+	}
+	m.waiters = append(m.waiters, w)
+	return w
+}
+
+func (m *CancelRWMutex) removeWaiter(target *waiter) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	for i, w := range m.waiters {
+		if w == target {
+			// Remove from slice
+			m.waiters = append(m.waiters[:i], m.waiters[i+1:]...)
+			break
+		}
+	}
 }
 
 //
 // Write locks
 //
 
-func (m *CtxRWMutex) Lock() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.writer <- struct{}{}
-	m.waitForReaders()
+func (m *CancelRWMutex) Lock() {
+	if m.isCancelled() {
+		panic("ctxsync: attempt to lock cancelled mutex")
+	}
+	
+	select {
+	case m.writer <- struct{}{}:
+		// Got writer slot immediately
+		m.waitForReaders()
+		return
+	default:
+		// Need to wait
+	}
+	
+	w := m.addWaiter(true)
+	if w == nil {
+		panic("ctxsync: attempt to lock cancelled mutex")
+	}
+	defer m.removeWaiter(w)
+	
+	for {
+		if m.isCancelled() {
+			panic("ctxsync: mutex was cancelled while waiting")
+		}
+		
+		select {
+		case m.writer <- struct{}{}:
+			m.waitForReaders()
+			return
+		case <-w.done:
+			panic("ctxsync: mutex was cancelled while waiting")
+		default:
+			// Keep trying
+		}
+	}
 }
 
-func (m *CtxRWMutex) Unlock() {
-
+func (m *CancelRWMutex) Unlock() {
 	select {
 	case <-m.writer:
 	default:
@@ -59,81 +142,69 @@ func (m *CtxRWMutex) Unlock() {
 	}
 }
 
-func (m *CtxRWMutex) LockContext(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	select {
-	case m.writer <- struct{}{}:
-		// Got writer slot
-	case <-ctx.Done():
-		return ErrCtxTimeout
-	}
-	m.waitForReaders()
-	return nil
-}
 
 //
 // Read locks
 //
 
-func (m *CtxRWMutex) RLock() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Wait until writer is gone
-	for len(m.writer) > 0 {
-		m.mu.Unlock()
-		m.mu.Lock()
+func (m *CancelRWMutex) RLock() {
+	if m.isCancelled() {
+		panic("ctxsync: attempt to lock cancelled mutex")
 	}
-	atomic.AddInt32(&m.readerCount, 1)
+	
+	m.mu.Lock()
+	// Fast path: no writer
+	if len(m.writer) == 0 {
+		atomic.AddInt32(&m.readerCount, 1)
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+	
+	w := m.addWaiter(false)
+	if w == nil {
+		panic("ctxsync: attempt to lock cancelled mutex")
+	}
+	defer m.removeWaiter(w)
+	
+	// Slow path: wait for writer to release
+	for {
+		if m.isCancelled() {
+			panic("ctxsync: mutex was cancelled while waiting")
+		}
+		
+		m.mu.Lock()
+		if len(m.writer) == 0 {
+			atomic.AddInt32(&m.readerCount, 1)
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Unlock()
+		
+		select {
+		case <-w.done:
+			panic("ctxsync: mutex was cancelled while waiting")
+		default:
+			// Keep trying
+		}
+	}
 }
 
-func (m *CtxRWMutex) RUnlock() {
+func (m *CancelRWMutex) RUnlock() {
 	newCount := atomic.AddInt32(&m.readerCount, -1)
 	if newCount < 0 {
 		panic("read unlock without matching lock")
 	}
 }
 
-func (m *CtxRWMutex) RLockContext(ctx context.Context) error {
-	// Fast path: no writer
-	m.mu.Lock()
-	if len(m.writer) == 0 {
-		atomic.AddInt32(&m.readerCount, 1)
-		m.mu.Unlock()
-		return nil
-	}
-	m.mu.Unlock()
 
-	// Slow path: wait for writer to release or ctx to timeout
-	done := make(chan struct{})
-	go func() {
-		for {
-			m.mu.Lock()
-			if len(m.writer) == 0 {
-				atomic.AddInt32(&m.readerCount, 1)
-				m.mu.Unlock()
-				close(done)
-				return
-			}
-			m.mu.Unlock()
-		}
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ErrCtxTimeout
-	}
-}
 
 //
 // Helpers
 //
 
-func (m *CtxRWMutex) waitForReaders() {
+func (m *CancelRWMutex) waitForReaders() {
 	// Writer waits until all readers exit
 	for {
 		if atomic.LoadInt32(&m.readerCount) == 0 {
@@ -141,7 +212,12 @@ func (m *CtxRWMutex) waitForReaders() {
 		}
 	}
 }
-func (m *CtxRWMutex) TryLock() bool {
+
+func (m *CancelRWMutex) TryLock() bool {
+	if m.isCancelled() {
+		return false
+	}
+	
 	select {
 	case m.writer <- struct{}{}:
 		m.waitForReaders()
@@ -151,7 +227,11 @@ func (m *CtxRWMutex) TryLock() bool {
 	}
 }
 
-func (m *CtxRWMutex) TryRLock() bool {
+func (m *CancelRWMutex) TryRLock() bool {
+	if m.isCancelled() {
+		return false
+	}
+	
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
