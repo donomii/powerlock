@@ -6,7 +6,8 @@
 //
 // Observed locks emit structured transition events. Watchdog locks add wait and exact-hold threshold events,
 // while LockGuard permits exact pairing of individual reader acquisitions. DefaultProfileObserver exposes current
-// waiters and exactly paired holders through runtime pprof profiles.
+// waiters and exactly paired holders through runtime pprof profiles. RuntimeTraceObserver annotates watchdog
+// thresholds in Go execution traces and can notify an application-owned flight recorder.
 //
 // Use ContextRWMutex for cancellable FIFO waiting, CancelRWMutex for irreversible shutdown, MaxRWMutex to bound
 // blocked acquisitions, ObservedRWMutex for complete event and metric reporting, WatchdogRWMutex for slow wait and

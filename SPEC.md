@@ -137,6 +137,14 @@ Changing a watchdog name to an empty string is invalid even before first use.
 
 The zero value is a ready unobserved lock with an empty name and both thresholds disabled. Use a constructor to enable watchdog behavior.
 
+## Runtime trace observer
+
+`RuntimeTraceObserver` accepts lock events but writes only wait-threshold and hold-threshold events to the Go execution trace. Each annotation uses the category `powerlock` and the event's single-line diagnostic string.
+
+`NewRuntimeTraceObserver` accepts an optional `FlightRecorderCallback`. The callback runs synchronously after the trace annotation and receives the same event. It runs even when runtime tracing is disabled so an application using Go 1.25 or later can enqueue a snapshot from its own active flight recorder. The callback must return promptly, not panic, perform no blocking I/O, and not acquire or release the emitting lock.
+
+Powerlock does not start, stop, configure, snapshot, or store a runtime trace flight recorder. Applications own that lifecycle and combine the runtime trace observer with other observers through `LockObserverGroup`.
+
 ## KeyedMutex
 
 `KeyedMutex[K]` serializes acquisitions sharing a comparable key while allowing different keys to proceed independently.

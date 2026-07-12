@@ -87,6 +87,7 @@ Observed locks emit structured state transitions. Watchdog locks add configurabl
 - Wait and exact-hold duration histograms
 - Wait and hold threshold counters
 - Cached metric handles for stable lock names
+- Runtime trace annotations with an optional application-owned flight-recorder callback
 
 **Usage:**
 ```go

@@ -23,7 +23,7 @@ Powerlock should become a Go synchronization toolkit that explains which named l
 - [x] Cache metric handles for each immutable lock name rather than resolving labels in every lock operation.
 - [x] Add `WatchdogRWMutex`. Its configurable wait and hold thresholds report slow acquisitions and long-held locks through the observer; it never releases a lock automatically.
 - [x] Add live pprof profiles for current waiters and holders where acquisition tokens permit exact pairing.
-- [ ] Add an optional trace flight-recorder callback for watchdog events.
+- [x] Add an optional trace flight-recorder callback for watchdog events.
 - [x] Add a guard-returning API for exact per-reader hold-duration reporting.
 - [x] Add a state snapshot containing current readers, writer state, waiter counts, oldest wait duration, and oldest measurable hold duration.
 - [x] Add a single-line event formatter containing duration, ownership, queue state, and the first captured external caller.

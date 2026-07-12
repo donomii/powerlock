@@ -15,6 +15,12 @@ operation format lock event(event)
     render the first captured caller outside Powerlock, or unavailable
     return one diagnostic line
 
+operation observe runtime trace(event, optional flight recorder callback)
+    ignore events other than wait threshold and hold threshold
+    write the diagnostic line to the powerlock execution-trace category
+    if a flight recorder callback is configured
+        deliver the event after writing the trace annotation
+
 operation acquire(lock, mode, context, maximum waiters, exact release requested)
     reject a context already cancelled or expired
     reject a permanently cancelled lock
