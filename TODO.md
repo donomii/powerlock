@@ -62,7 +62,7 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Add a diagnostic demonstration.
 - [x] Add editable and 1280×640 PNG social-preview assets under `assets/`.
 - [ ] Add a dashboard image and upload `assets/social-preview.png` in the repository settings.
-- [ ] Change the repository description to “Named FIFO Go locks with context cancellation, bounded queues, watchdog diagnostics, pprof, and Prometheus metrics.”
+- [x] Change the repository description to “Named FIFO Go locks with context cancellation, bounded queues, watchdog diagnostics, pprof, and Prometheus metrics.”
 - [ ] Set the topics `go`, `golang`, `mutex`, `concurrency`, `debugging`, `observability`, `prometheus`, and `pprof`, then set the homepage to the pkg.go.dev package after release.
 - [ ] Tag a `v0.1.0` release after the correctness and documentation gates pass.
 - [ ] Ensure the package is rendered and discoverable on pkg.go.dev.
