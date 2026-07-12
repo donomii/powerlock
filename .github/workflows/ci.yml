@@ -40,9 +40,6 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -50,11 +47,11 @@ jobs:
           go-version: 1.26.x
           cache: true
       - run: go test -coverprofile=coverage.out . ./prometheus
-      - uses: codecov/codecov-action@v7
+      - run: go tool cover -func=coverage.out
+      - uses: actions/upload-artifact@v6
         with:
-          fail_ci_if_error: true
-          files: ./coverage.out
-          use_oidc: true
+          name: coverage-report
+          path: coverage.out
 
   format-and-examples:
     runs-on: ubuntu-latest
