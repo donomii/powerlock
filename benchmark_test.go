@@ -6,15 +6,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
-
-func newBenchmarkMeteredRWMutex(location string) *MeteredRWMutex {
-	reg := prometheus.NewRegistry()
-	locksWaiting, locks := NewLockMetrics(reg)
-	return NewMeteredRWMutex(location, locksWaiting, locks)
-}
 
 func BenchmarkSyncRWMutexWrite(b *testing.B) {
 	var m sync.RWMutex
@@ -34,15 +26,6 @@ func BenchmarkCancelRWMutexWrite(b *testing.B) {
 	}
 }
 
-func BenchmarkMeteredRWMutexWrite(b *testing.B) {
-	m := newBenchmarkMeteredRWMutex("benchmark")
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		m.Lock()
-		m.Unlock()
-	}
-}
-
 func BenchmarkSyncRWMutexRead(b *testing.B) {
 	var m sync.RWMutex
 	b.ReportAllocs()
@@ -54,15 +37,6 @@ func BenchmarkSyncRWMutexRead(b *testing.B) {
 
 func BenchmarkCancelRWMutexRead(b *testing.B) {
 	m := NewCancelRWMutex("benchmark")
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		m.RLock()
-		m.RUnlock()
-	}
-}
-
-func BenchmarkMeteredRWMutexRead(b *testing.B) {
-	m := newBenchmarkMeteredRWMutex("benchmark")
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		m.RLock()

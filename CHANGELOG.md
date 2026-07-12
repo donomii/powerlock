@@ -12,3 +12,4 @@
 - Prevent stale metric gauge overwrites, cancelled-waiter capacity leaks, keyed pre-cancellation leaks, lost elapsed thresholds,
   out-of-order pprof holder entries, and hold reports preceding acquisition delivery.
 - Remove the untagged nonstandard `RTryLock` aliases in favor of `TryRLock`.
+- Move the original aggregate Prometheus compatibility API into the `powerlock/prometheus` adapter so the core package no longer compiles Prometheus dependencies.

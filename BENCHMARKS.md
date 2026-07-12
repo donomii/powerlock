@@ -16,7 +16,6 @@ go test -run '^$' -bench=. -benchmem -benchtime=500ms -count=3
 | `WatchdogRWMutex` write, observer disabled | 35.74 ns | 0 | 0 |
 | `ObservedRWMutex` write, observer enabled | 219.3 ns | 0 | 0 |
 | `WatchdogRWMutex` write, observer and thresholds enabled | 836.9 ns | 528 | 5 |
-| Legacy `MeteredRWMutex` write | 222.0 ns | 0 | 0 |
 | Successful `ContextRWMutex.TryLock` | 34.64 ns | 0 | 0 |
 | Busy `ContextRWMutex.TryLock` | 8.357 ns | 0 | 0 |
 | Pre-cancelled `ContextRWMutex.LockContext` | 128.9 ns | 144 | 1 |
@@ -25,7 +24,6 @@ go test -run '^$' -bench=. -benchmem -benchtime=500ms -count=3
 | `CancelRWMutex` read | 34.23 ns | 0 | 0 |
 | `ContextRWMutex` read | 34.11 ns | 0 | 0 |
 | `MaxRWMutex` read | 38.39 ns | 0 | 0 |
-| Legacy `MeteredRWMutex` read | 216.7 ns | 0 | 0 |
 | `sync.RWMutex` parallel write | 98.42 ns | 0 | 0 |
 | `ContextRWMutex` parallel write | 679.8 ns | 319 | 2 |
 | `ContextRWMutex` parallel read | 233.3 ns | 0 | 0 |

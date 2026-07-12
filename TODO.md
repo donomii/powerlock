@@ -18,7 +18,7 @@ Powerlock should become a Go synchronization toolkit that explains which named l
 ## Diagnostics and monitoring
 
 - [x] Add an observer interface in the core package. An observer receives stable lock name, read/write mode, wait duration, hold duration when measurable, and acquisition outcome.
-- [ ] Remove the legacy root Prometheus API after README compatibility work so core-only users no longer compile the Prometheus client packages. The new adapter is already in `powerlock/prometheus`.
+- [x] Remove the legacy root Prometheus API after README compatibility work so core-only users no longer compile the Prometheus client packages. The compatibility surface now lives in `powerlock/prometheus`.
 - [x] Expand Prometheus reporting with bounded labels, read/write waiter and holder gauges, acquisition outcome counters, and wait-duration histograms.
 - [x] Cache metric handles for each immutable lock name rather than resolving labels in every lock operation.
 - [x] Add `WatchdogRWMutex`. Its configurable wait and hold thresholds report slow acquisitions and long-held locks through the observer; it never releases a lock automatically.

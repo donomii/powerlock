@@ -137,16 +137,6 @@ Changing a watchdog name to an empty string is invalid even before first use.
 
 The zero value is a ready unobserved lock with an empty name and both thresholds disabled. Use a constructor to enable watchdog behavior.
 
-## MeteredRWMutex
-
-`MeteredRWMutex` preserves the original two-gauge Prometheus constructor. The lock name and label binding may change before first use and are immutable afterward. Metric handles are bound before use rather than resolved on every operation.
-
-Supplying both legacy gauges as nil creates an unobserved lock. Supplying exactly one nil gauge is invalid. The zero value is an unobserved FIFO context-aware lock.
-
-`RegisterLockMetrics` registers the legacy waiting and held gauges and returns registration errors. `NewLockMetrics` panics on registration failure for compatibility.
-
-The newer Prometheus observer is specified separately below.
-
 ## KeyedMutex
 
 `KeyedMutex[K]` serializes acquisitions sharing a comparable key while allowing different keys to proceed independently.
@@ -196,6 +186,8 @@ Each simultaneously live observed lock should have a unique name. This lets stat
 Version acceptance and all four state-gauge updates are serialized so a paused older event cannot overwrite gauges from a newer event.
 
 `New` uses the Prometheus default duration buckets. `NewWithBuckets` accepts finite, positive, strictly increasing bucket boundaries expressed in seconds. `MustNew` panics on registration failure. Convenience constructors attach the observer to observed or watchdog locks.
+
+The adapter package also contains `MeteredRWMutex`, `NewLockMetrics`, and `RegisterLockMetrics` for migration from the original aggregate gauges. These compatibility names are not exported by the core package.
 
 ## Unsupported behavior
 

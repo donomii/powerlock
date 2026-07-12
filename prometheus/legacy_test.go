@@ -9,7 +9,7 @@
 //  CONTACT: hello@weaviate.io
 //
 
-package powerlock
+package powerlockprometheus
 
 import (
 	"runtime"
@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donomii/powerlock"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -27,14 +28,14 @@ func newTestMeteredRWMutex(t *testing.T, location string) *MeteredRWMutex {
 	return NewMeteredRWMutex(location, locksWaiting, locks)
 }
 
-type pausingGauge struct {
+type legacyPausingGauge struct {
 	prometheus.Gauge
 	once    sync.Once
 	entered chan struct{}
 	release chan struct{}
 }
 
-func (g *pausingGauge) Set(value float64) {
+func (g *legacyPausingGauge) Set(value float64) {
 	g.once.Do(func() {
 		close(g.entered)
 		<-g.release
@@ -160,7 +161,7 @@ func TestMeteredRWMutex_WaitingGauge(t *testing.T) {
 		m.RUnlock()
 		close(result)
 	}()
-	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+	waitForLegacyState(t, m.Snapshot, func(state powerlock.LockState) bool {
 		return state.WaitingReaders == 1
 	})
 	waitForLegacyGauge(t, locksWaiting.WithLabelValues("test-metered"), 1)
@@ -218,8 +219,8 @@ func TestLegacyPrometheusObserver_IgnoresDelayedStaleState(t *testing.T) {
 	waiting := prometheus.NewGauge(prometheus.GaugeOpts{Name: "test_waiting"})
 	held := prometheus.NewGauge(prometheus.GaugeOpts{Name: "test_held"})
 	observer := &legacyPrometheusObserver{waiting: waiting, held: held}
-	observer.ObserveLock(LockEvent{State: LockState{Version: 2}})
-	observer.ObserveLock(LockEvent{State: LockState{Version: 1, Writer: true}})
+	observer.ObserveLock(powerlock.LockEvent{State: powerlock.LockState{Version: 2}})
+	observer.ObserveLock(powerlock.LockEvent{State: powerlock.LockState{Version: 1, Writer: true}})
 	if got := testutil.ToFloat64(held); got != 0 {
 		t.Fatalf("expected stale state to be ignored, got held=%v", got)
 	}
@@ -227,7 +228,7 @@ func TestLegacyPrometheusObserver_IgnoresDelayedStaleState(t *testing.T) {
 
 func TestLegacyPrometheusObserver_SerializesVersionAndGaugeUpdate(t *testing.T) {
 	waiting := prometheus.NewGauge(prometheus.GaugeOpts{Name: "serialized_waiting"})
-	held := &pausingGauge{
+	held := &legacyPausingGauge{
 		Gauge:   prometheus.NewGauge(prometheus.GaugeOpts{Name: "serialized_held"}),
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
@@ -235,13 +236,13 @@ func TestLegacyPrometheusObserver_SerializesVersionAndGaugeUpdate(t *testing.T) 
 	observer := &legacyPrometheusObserver{waiting: waiting, held: held}
 	firstDone := make(chan struct{})
 	go func() {
-		observer.ObserveLock(LockEvent{State: LockState{Version: 1, Writer: true}})
+		observer.ObserveLock(powerlock.LockEvent{State: powerlock.LockState{Version: 1, Writer: true}})
 		close(firstDone)
 	}()
 	<-held.entered
 	secondDone := make(chan struct{})
 	go func() {
-		observer.ObserveLock(LockEvent{State: LockState{Version: 2}})
+		observer.ObserveLock(powerlock.LockEvent{State: powerlock.LockState{Version: 2}})
 		close(secondDone)
 	}()
 	assertChannelOpen(t, secondDone, "newer metric state completed while an older gauge update was paused")
@@ -265,6 +266,24 @@ func waitForLegacyGauge(t *testing.T, gauge prometheus.Gauge, expected float64) 
 		select {
 		case <-timer.C:
 			t.Fatalf("legacy gauge did not reach expected value: expected=%v observed=%v", expected, observed)
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+func waitForLegacyState(t *testing.T, snapshot func() powerlock.LockState, matches func(powerlock.LockState) bool) {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		state := snapshot()
+		if matches(state) {
+			return
+		}
+		select {
+		case <-timer.C:
+			t.Fatalf("legacy lock state did not reach expected condition: %+v", state)
 		default:
 			runtime.Gosched()
 		}

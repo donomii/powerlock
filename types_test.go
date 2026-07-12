@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestDiagnosticStringValues(t *testing.T) {
@@ -109,10 +107,6 @@ func TestInvalidConfigurations(t *testing.T) {
 	expectPanic(t, func() { NewKeyedMutexWithLimit[string]("keys", 0) })
 	expectPanic(t, func() { NewWatchdogRWMutex("", nil) })
 	expectPanic(t, func() { NewWatchdogRWMutexWithThresholds("watchdog", -time.Second, 0, nil) })
-	expectPanic(t, func() {
-		waiting := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "invalid_waiting"}, []string{"location"})
-		NewMeteredRWMutex("metered", waiting, nil)
-	})
 }
 
 func TestAdditionalConstructorSurfaces(t *testing.T) {

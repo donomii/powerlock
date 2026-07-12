@@ -4,8 +4,10 @@ This repository contains alternative lock implementations to help with debugging
 
 - **CancelRWMutex** - Cancellable locks that can reject all current and future waiters
 - **MaxRWMutex** - Locks that limit the number of waiting goroutines
-- **MeteredRWMutex** - Prometheus-instrumented locks for observability
 - **ContextRWMutex** - Locks that return when a context is cancelled or times out
+- **ObservedRWMutex** - Structured acquisition, release, contention, and rejection events
+- **WatchdogRWMutex** - Wait and hold threshold diagnostics with acquisition stacks
+- **KeyedMutex** - Independent exclusion by comparable key with bounded key counts
 
 ## Overview
 
@@ -15,7 +17,7 @@ See [Choosing a lock](LOCKS.md) for a side-by-side comparison of failure behavio
 
 ## Features
 
-This library offers four specialized mutex types, each addressing different concurrent programming challenges:
+This library offers specialized read-write and exclusive mutex types for different concurrent programming challenges:
 
 ### CancelRWMutex - Cancellable Locking
 
@@ -69,34 +71,37 @@ if mutex.TryLock() {
     defer mutex.Unlock()
     // Critical section
 } else {
-    // Handle case where lock is busy or queue is full
+    // Handle the lock being unavailable without joining the queue.
 }
 ```
 
 `NewMaxRWMutex(location)` uses a default limit of 1.
 
-### MeteredRWMutex - Prometheus Monitoring
+### ObservedRWMutex and WatchdogRWMutex - Diagnostics and Prometheus
 
-A read-write mutex instrumented with Prometheus metrics for observability into lock contention and usage patterns.
+Observed locks emit structured state transitions. Watchdog locks add configurable slow-wait and long-hold reports with acquisition stacks. The optional `powerlock/prometheus` adapter converts those events into bounded metrics without adding Prometheus imports to the core package.
 
 **Key capabilities:**
-- Tracks number of goroutines waiting for locks
-- Monitors number of goroutines currently holding locks
-- Location-based labeling for detailed analysis
-- Prometheus gauge updates on every lock and unlock path
+- Read/write waiter and holder gauges
+- Acquisition result and contention counters
+- Wait and exact-hold duration histograms
+- Wait and hold threshold counters
+- Cached metric handles for stable lock names
 
 **Usage:**
 ```go
-// Set up metrics
-reg := prometheus.NewRegistry()
-locksWaiting, locks := powerlock.NewLockMetrics(reg)
+import (
+    powerlockprometheus "github.com/donomii/powerlock/prometheus"
+    "github.com/prometheus/client_golang/prometheus"
+)
 
-// Create metered mutex
-mutex := powerlock.NewMeteredRWMutex("cache-update", locksWaiting, locks)
+reg := prometheus.NewRegistry()
+metrics := powerlockprometheus.MustNew(reg)
+mutex := metrics.NewWatchdogRWMutex("cache-update")
 
 mutex.Lock()
 defer mutex.Unlock()
-// Metrics automatically updated during lock operations
+// Structured events and Prometheus metrics are updated automatically.
 ```
 
 ### ContextRWMutex - Context-Aware Locking
@@ -104,7 +109,7 @@ defer mutex.Unlock()
 A read-write mutex whose blocking lock operations return if the supplied context is cancelled or reaches its deadline.
 
 **Key capabilities:**
-- `LockContext(ctx)` and `RLockContext(ctx)` return `ctx.Err()` instead of blocking forever
+- `LockContext(ctx)` and `RLockContext(ctx)` return typed acquisition errors that preserve `ctx.Err()` through `errors.Is`
 - `Lock()` and `RLock()` remain available for standard blocking use
 - Non-blocking try-lock operations for both read and write locks
 
@@ -131,28 +136,33 @@ go get github.com/donomii/powerlock@latest
 ## Requirements
 
 - Go 1.23 or later
-- Prometheus client library (for MeteredRWMutex)
+- Prometheus client library only when importing the optional `powerlock/prometheus` adapter
 
 ## Use Cases
 
 - **CancelRWMutex**: Graceful shutdown scenarios, resource cleanup, or any situation where you need to cancel pending operations
 - **MaxRWMutex**: High-throughput services where you want to prevent lock queue buildup
-- **MeteredRWMutex**: Production systems requiring observability into lock contention patterns
 - **ContextRWMutex**: Request-scoped work where waiting for a lock must respect cancellation and deadlines
+- **ObservedRWMutex**: Structured diagnostics, metrics adapters, and exact acquisition guards
+- **WatchdogRWMutex**: Slow-wait and long-hold incidents with acquisition callers
+- **KeyedMutex**: Per-customer, per-resource, or per-job exclusion without a permanent lock map
 
 ## Common Interface
 
-All mutex types implement a common interface with these methods:
+All read-write mutex types provide these methods:
 - `Lock()` / `Unlock()` - Exclusive write access
 - `RLock()` / `RUnlock()` - Shared read access  
 - `TryLock()` / `TryRLock()` - Non-blocking lock attempts
-- `SetLocation(string)` - Update location label for debugging/metrics
+- `SetLocation(string)` - Set the stable diagnostic name before first use
 
 Each type extends this base interface with its specialized capabilities:
 - **CancelRWMutex** adds: `Cancel()` method for rejecting waiters
 - **MaxRWMutex** adds: waiter limiting behavior
-- **MeteredRWMutex** adds: automatic Prometheus metrics collection
 - **ContextRWMutex** adds: `LockContext(context.Context)` and `RLockContext(context.Context)`
+- **ObservedRWMutex** adds: structured events and exact acquisition guards
+- **WatchdogRWMutex** adds: wait and exact-hold threshold reports
+
+Exclusive-only forms omit the read methods. `KeyedMutex` accepts a key on acquisition and release.
 
 ## Examples
 
@@ -161,6 +171,8 @@ go run ./examples/cancel
 go run ./examples/max
 go run ./examples/metrics
 go run ./examples/context
+go run ./examples/keyed
+go run ./examples/watchdog
 ```
 
 ## Benchmarks
