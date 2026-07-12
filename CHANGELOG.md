@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.1.0 - 2026-07-11
+
 - Correct bounded waiting so current holders do not consume waiter capacity.
 - Use one FIFO queue for context cancellation, permanent cancellation, bounded waiting, and fairness.
 - Add structured observers, watchdog thresholds, exact acquisition guards, live pprof state, and expanded Prometheus metrics.
