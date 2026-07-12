@@ -51,7 +51,7 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Add a package `doc.go` and documentation for every exported type, constructor, method, constant, and error.
 - [x] Add executable package examples and exact-output examples, including a real contention incident and the emitted diagnostic data.
 - [x] Add a lock-selection and failure-semantics matrix in `LOCKS.md`.
-- [ ] Link the selection matrix from the existing README when repository instructions permit editing it.
+- [x] Link the selection matrix from the existing README when repository instructions permit editing it.
 - [ ] Correct public installation, import, and module-path instructions when repository instructions permit editing the existing README.
 - [x] Add a limitations document explaining fairness, panic behavior, metric cardinality, copying restrictions, and when the standard library is preferable.
 - [x] Add hosted verification for tests, race detection, vetting, formatting, examples, and supported Go versions.
