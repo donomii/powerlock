@@ -58,7 +58,7 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Establish Go 1.23 as the oldest supported version from dependency requirements and a local Go 1.23.0 test run.
 - [x] Add a changelog, compatibility policy, contribution guide, issue forms, and security reporting instructions.
 - [x] Audit source provenance and record the missing upstream information in `PROVENANCE.md`.
-- [ ] Identify the exact imported upstream revisions and make source notices consistent before release.
+- [x] Identify the exact imported upstream revisions and make source notices consistent before release.
 - [x] Add a diagnostic demonstration.
 - [x] Add editable and 1280×640 PNG social-preview assets under `assets/`.
 - [ ] Add a dashboard image and upload `assets/social-preview.png` in the repository settings.

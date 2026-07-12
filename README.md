@@ -181,3 +181,7 @@ go run ./examples/watchdog
 ```bash
 go test -bench=.
 ```
+
+## License and notices
+
+See [LICENSE](LICENSE) for Powerlock's license and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for retained upstream notices.
