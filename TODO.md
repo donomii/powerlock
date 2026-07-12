@@ -43,7 +43,7 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Replace sleep-based coordination with deterministic channels or `testing/synctest` where supported.
 - [x] Add saturation, cancellation/unlock race, writer fairness, zero-value, metric-value, and diagnostic-content tests.
 - [x] Add benchmarks for Max, Context, Watchdog, observer-disabled operation, try paths, cancellation, queue saturation, mixed readers/writers, and parallel contention.
-- [ ] Extend `BENCHMARKS.md` beyond the current reproducible `sync.RWMutex` comparison with relevant diagnostic libraries.
+- [x] Extend `BENCHMARKS.md` beyond the current reproducible `sync.RWMutex` comparison with relevant diagnostic libraries.
 - [x] Keep `go test -race ./...`, `go vet ./...`, formatting, examples, and supported-version tests in the local and hosted verification gates.
 
 ## Package and repository

@@ -14,3 +14,4 @@
 - Remove the untagged nonstandard `RTryLock` aliases in favor of `TryRLock`.
 - Move the original aggregate Prometheus compatibility API into the `powerlock/prometheus` adapter so the core package no longer compiles Prometheus dependencies.
 - Add runtime trace annotations and an optional application-owned flight-recorder callback for watchdog threshold events.
+- Add a pinned, reproducible comparison with three external diagnostic lock libraries.
