@@ -154,3 +154,57 @@ func TestObservedRWMutex_EarlyReleaseQueuesAfterAcquiredEvent(t *testing.T) {
 		t.Fatalf("expected acquired then released ordering, events=%+v", events)
 	}
 }
+
+func TestObservedRWMutex_ContendedGuardKeepsOneAttemptIdentity(t *testing.T) {
+	observer := newRecordingObserver()
+	m := NewObservedRWMutex("observed-lifecycle", observer)
+	m.Lock()
+	type guardResult struct {
+		guard *LockGuard
+		err   error
+	}
+	result := make(chan guardResult, 1)
+	go func() {
+		guard, err := m.RLockGuard(context.Background())
+		result <- guardResult{guard: guard, err: err}
+	}()
+	waitStarted := waitForEvent(t, observer, LockEventWaitStarted)
+	if waitStarted.AttemptID == 0 || waitStarted.Mode != LockModeRead || !waitStarted.Contended || !waitStarted.State.Writer || waitStarted.State.WaitingReaders != 1 {
+		t.Fatalf("unexpected wait-start event: %+v", waitStarted)
+	}
+	m.Unlock()
+	observed := <-result
+	if observed.err != nil {
+		t.Fatalf("expected guarded reader acquisition, got %v", observed.err)
+	}
+	observed.guard.Unlock()
+	var acquired LockEvent
+	var released LockEvent
+	for _, event := range observer.snapshot() {
+		if event.AttemptID != waitStarted.AttemptID {
+			continue
+		}
+		if event.Kind == LockEventAcquired {
+			acquired = event
+		}
+		if event.Kind == LockEventReleased {
+			released = event
+		}
+	}
+	if acquired.Kind != LockEventAcquired || !acquired.Contended || !acquired.ExactHold || acquired.State.Readers != 1 || acquired.State.Writer {
+		t.Fatalf("unexpected acquired event: %+v", acquired)
+	}
+	if released.Kind != LockEventReleased || !released.ExactHold || !released.HoldDurationKnown || released.State.Readers != 0 {
+		t.Fatalf("unexpected released event: %+v", released)
+	}
+}
+
+func TestObservedRWMutex_RLockerUsesSharedOwnership(t *testing.T) {
+	m := NewObservedRWMutex("observed-rlocker", nil)
+	reader := m.RLocker()
+	reader.Lock()
+	if state := m.Snapshot(); state.Readers != 1 || state.Writer {
+		t.Fatalf("expected shared ownership through RLocker, got %+v", state)
+	}
+	reader.Unlock()
+}

@@ -2,6 +2,7 @@ package powerlock
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -73,7 +74,19 @@ func TestWatchdogRWMutex_ReportsGuardHoldThreshold(t *testing.T) {
 	if event.AttemptID != guard.AttemptID() || event.Mode != LockModeRead || event.HoldDuration < time.Millisecond {
 		t.Fatalf("unexpected hold threshold event: %+v", event)
 	}
+	if state := m.Snapshot(); state.Readers != 1 {
+		t.Fatalf("hold report changed ownership: %+v", state)
+	}
 	guard.Unlock()
+	holdReports := 0
+	for _, observed := range observer.snapshot() {
+		if observed.Kind == LockEventHoldExceeded && observed.AttemptID == guard.AttemptID() {
+			holdReports++
+		}
+	}
+	if holdReports != 1 {
+		t.Fatalf("expected one hold report, got %d in %+v", holdReports, observer.snapshot())
+	}
 }
 
 func TestWatchdogRWMutex_Defaults(t *testing.T) {
@@ -94,6 +107,8 @@ func TestWatchdogMutex_ExclusiveSurface(t *testing.T) {
 		t.Fatal("expected TryLock to fail while held")
 	}
 	guard.Unlock()
+	m.Lock()
+	m.Unlock()
 }
 
 func TestWatchdogRWMutex_RejectsEmptyNameChange(t *testing.T) {
@@ -256,5 +271,32 @@ func TestWatchdogRWMutex_EarlyReleaseQueuesOrderedEvents(t *testing.T) {
 	events := recording.snapshot()
 	if len(events) != 3 || events[0].Kind != LockEventAcquired || events[1].Kind != LockEventHoldExceeded || events[2].Kind != LockEventReleased {
 		t.Fatalf("expected acquired, hold threshold, and release ordering, events=%+v", events)
+	}
+}
+
+func TestWatchdogRWMutex_ZeroThresholdsSuppressElapsedReports(t *testing.T) {
+	observer := newRecordingObserver()
+	m := NewWatchdogRWMutexWithThresholds("disabled-thresholds", 0, 0, observer)
+	guard, err := m.LockGuard(context.Background())
+	if err != nil {
+		t.Fatalf("expected write guard, got %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- m.LockContext(ctx) }()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return state.WaitingWriters == 1 })
+	m.core.mu.Lock()
+	m.core.writerAcquiredAt = time.Now().Add(-2 * time.Hour)
+	m.core.waiters[0].queuedAt = time.Now().Add(-2 * time.Hour)
+	m.core.mu.Unlock()
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected queued cancellation, got %v", err)
+	}
+	guard.Unlock()
+	for _, event := range observer.snapshot() {
+		if event.Kind == LockEventWaitExceeded || event.Kind == LockEventHoldExceeded {
+			t.Fatalf("disabled threshold emitted %s: %+v", event.Kind, event)
+		}
 	}
 }

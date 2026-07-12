@@ -14,6 +14,7 @@ package powerlock
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -222,5 +223,83 @@ func TestMaxRWMutex_RemovesExpiredWaiterBeforeCapacityCheck(t *testing.T) {
 	m.Unlock()
 	if err := <-result; err != nil {
 		t.Fatalf("expected replacement waiter to use released capacity, got %v", err)
+	}
+}
+
+func TestMaxRWMutex_DefaultConstructorAndStableIdentity(t *testing.T) {
+	m := NewMaxRWMutex("before")
+	m.SetLocation("bounded-rw")
+	if m.Name() != "bounded-rw" || m.MaxWaiting() != DefaultMaxWaiting {
+		t.Fatalf("unexpected default lock configuration: name=%q maximum=%d", m.Name(), m.MaxWaiting())
+	}
+	m.RLock()
+	m.RUnlock()
+	message := panicText(t, func() { m.SetLocation("changed") })
+	if !strings.Contains(message, `current="bounded-rw"`) || !strings.Contains(message, `requested="changed"`) {
+		t.Fatalf("post-use name error omitted identities: %s", message)
+	}
+}
+
+func TestMaxRWMutex_SharesCapacityAcrossReadAndWriteWaiters(t *testing.T) {
+	m := NewMaxRWMutexWithLimit("mixed-capacity", 2)
+	m.Lock()
+	type acquisition struct {
+		mode LockMode
+		err  error
+	}
+	acquired := make(chan acquisition, 2)
+	readerRelease := make(chan struct{})
+	go func() {
+		err := m.RLockContext(context.Background())
+		acquired <- acquisition{mode: LockModeRead, err: err}
+		if err == nil {
+			<-readerRelease
+			m.RUnlock()
+		}
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return state.WaitingReaders == 1 })
+	writerRelease := make(chan struct{})
+	go func() {
+		err := m.LockContext(context.Background())
+		acquired <- acquisition{mode: LockModeWrite, err: err}
+		if err == nil {
+			<-writerRelease
+			m.Unlock()
+		}
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingReaders == 1 && state.WaitingWriters == 1
+	})
+	assertQueueFullError(t, m.RLockContext(context.Background()), LockModeRead, 2)
+	assertQueueFullError(t, m.LockContext(context.Background()), LockModeWrite, 2)
+	if message := panicText(t, m.RLock); !strings.Contains(message, ErrMaxWaiting.Error()) {
+		t.Fatalf("RLock saturation panic omitted cause: %s", message)
+	}
+	if message := panicText(t, m.Lock); !strings.Contains(message, ErrMaxWaiting.Error()) {
+		t.Fatalf("Lock saturation panic omitted cause: %s", message)
+	}
+	state := m.Snapshot()
+	if state.WaitingReaders != 1 || state.WaitingWriters != 1 {
+		t.Fatalf("rejected acquisitions changed queue state: %+v", state)
+	}
+	m.Unlock()
+	first := <-acquired
+	if first.mode != LockModeRead || first.err != nil {
+		t.Fatalf("expected queued reader first, got mode=%s err=%v", first.mode, first.err)
+	}
+	close(readerRelease)
+	second := <-acquired
+	if second.mode != LockModeWrite || second.err != nil {
+		t.Fatalf("expected queued writer second, got mode=%s err=%v", second.mode, second.err)
+	}
+	close(writerRelease)
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return !state.Writer })
+}
+
+func assertQueueFullError(t *testing.T, err error, mode LockMode, maximum int) {
+	t.Helper()
+	var acquisitionErr *AcquisitionError
+	if !errors.As(err, &acquisitionErr) || acquisitionErr.Mode != mode || acquisitionErr.Result != LockResultQueueFull || acquisitionErr.MaxWaiting != maximum {
+		t.Fatalf("unexpected %s queue-full error: %+v", mode, acquisitionErr)
 	}
 }

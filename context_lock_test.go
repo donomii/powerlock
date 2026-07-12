@@ -361,3 +361,111 @@ func TestContextRWMutex_CancellationUnlockRace(t *testing.T) {
 		}
 	}
 }
+
+func TestContextRWMutex_CancelledFrontReaderPreservesFollowingWriter(t *testing.T) {
+	m := NewContextRWMutex("cancel-front-reader")
+	m.Lock()
+	readerContext, cancelReader := context.WithCancel(context.Background())
+	readerResult := make(chan error, 1)
+	go func() { readerResult <- m.RLockContext(readerContext) }()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return state.WaitingReaders == 1 })
+	writerAcquired := make(chan struct{})
+	writerRelease := make(chan struct{})
+	go func() {
+		m.Lock()
+		close(writerAcquired)
+		<-writerRelease
+		m.Unlock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingReaders == 1 && state.WaitingWriters == 1
+	})
+	cancelReader()
+	if err := <-readerResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected front reader cancellation, got %v", err)
+	}
+	state := m.Snapshot()
+	if !state.Writer || state.WaitingReaders != 0 || state.WaitingWriters != 1 {
+		t.Fatalf("following writer did not remain queued: %+v", state)
+	}
+	m.Unlock()
+	waitForSignal(t, writerAcquired, "following writer did not acquire")
+	close(writerRelease)
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return !state.Writer })
+}
+
+func TestContextRWMutex_CancelAfterAcquisitionDoesNotRevokeOwnership(t *testing.T) {
+	m := NewContextRWMutex("context-lifetime")
+	writeContext, cancelWrite := context.WithCancel(context.Background())
+	if err := m.LockContext(writeContext); err != nil {
+		t.Fatalf("expected write acquisition, got %v", err)
+	}
+	cancelWrite()
+	if state := m.Snapshot(); !state.Writer {
+		t.Fatalf("write context cancellation revoked ownership: %+v", state)
+	}
+	m.Unlock()
+	readContext, cancelRead := context.WithCancel(context.Background())
+	if err := m.RLockContext(readContext); err != nil {
+		t.Fatalf("expected read acquisition, got %v", err)
+	}
+	cancelRead()
+	if state := m.Snapshot(); state.Readers != 1 {
+		t.Fatalf("read context cancellation revoked ownership: %+v", state)
+	}
+	m.RUnlock()
+}
+
+func TestFairRWMutex_PreservesMixedFIFOOrder(t *testing.T) {
+	m := NewFairRWMutex("fair-mixed")
+	m.RLock()
+	acquired := make(chan string, 3)
+	firstWriterRelease := make(chan struct{})
+	go func() {
+		m.Lock()
+		acquired <- "writer-1"
+		<-firstWriterRelease
+		m.Unlock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return state.WaitingWriters == 1 })
+	readerRelease := make(chan struct{})
+	go func() {
+		m.RLock()
+		acquired <- "reader-2"
+		<-readerRelease
+		m.RUnlock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 1 && state.WaitingReaders == 1
+	})
+	lastWriterRelease := make(chan struct{})
+	go func() {
+		m.Lock()
+		acquired <- "writer-3"
+		<-lastWriterRelease
+		m.Unlock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 2 && state.WaitingReaders == 1
+	})
+	m.RUnlock()
+	expectAcquisition(t, acquired, "writer-1")
+	close(firstWriterRelease)
+	expectAcquisition(t, acquired, "reader-2")
+	close(readerRelease)
+	expectAcquisition(t, acquired, "writer-3")
+	close(lastWriterRelease)
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return !state.Writer && state.Readers == 0 })
+}
+
+func expectAcquisition(t *testing.T, acquired <-chan string, expected string) {
+	t.Helper()
+	select {
+	case observed := <-acquired:
+		if observed != expected {
+			t.Fatalf("expected %s to acquire, got %s", expected, observed)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", expected)
+	}
+}

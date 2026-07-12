@@ -12,7 +12,10 @@
 package powerlockprometheus
 
 import (
+	"context"
+	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -254,6 +257,87 @@ func TestLegacyPrometheusObserver_SerializesVersionAndGaugeUpdate(t *testing.T) 
 	}
 }
 
+func TestMeteredRWMutex_CompleteCompatibilitySurface(t *testing.T) {
+	m := newTestMeteredRWMutex(t, "complete-surface")
+	if m.Name() != "complete-surface" {
+		t.Fatalf("unexpected lock name: %q", m.Name())
+	}
+	if err := m.LockContext(context.Background()); err != nil {
+		t.Fatalf("expected write acquisition, got %v", err)
+	}
+	if state := m.Snapshot(); !state.Writer {
+		t.Fatalf("expected held writer, got %+v", state)
+	}
+	m.Unlock()
+	if err := m.RLockContext(context.Background()); err != nil {
+		t.Fatalf("expected read acquisition, got %v", err)
+	}
+	m.RUnlock()
+	reader := m.RLocker()
+	reader.Lock()
+	reader.Unlock()
+	writeGuard, err := m.LockGuard(context.Background())
+	if err != nil {
+		t.Fatalf("expected write guard, got %v", err)
+	}
+	if readGuard, acquired := m.TryRLockGuard(); acquired || readGuard != nil {
+		t.Fatalf("expected held writer to reject read guard, guard=%v acquired=%t", readGuard, acquired)
+	}
+	writeGuard.Unlock()
+	readGuard, err := m.RLockGuard(context.Background())
+	if err != nil {
+		t.Fatalf("expected read guard, got %v", err)
+	}
+	if writeGuard, acquired := m.TryLockGuard(); acquired || writeGuard != nil {
+		t.Fatalf("expected held reader to reject write guard, guard=%v acquired=%t", writeGuard, acquired)
+	}
+	readGuard.Unlock()
+	writeGuard, acquired := m.TryLockGuard()
+	if !acquired {
+		t.Fatal("expected write try-guard acquisition")
+	}
+	writeGuard.Unlock()
+	readGuard, acquired = m.TryRLockGuard()
+	if !acquired {
+		t.Fatal("expected read try-guard acquisition")
+	}
+	readGuard.Unlock()
+}
+
+func TestMeteredRWMutex_ZeroValueSnapshotInitializesReadout(t *testing.T) {
+	var m MeteredRWMutex
+	state := m.Snapshot()
+	if state.Name != "" || state.Writer || state.Readers != 0 || m.Name() != "" {
+		t.Fatalf("unexpected zero-value readout: name=%q state=%+v", m.Name(), state)
+	}
+}
+
+func TestLegacyRegistrationAndGaugeConfigurationFailures(t *testing.T) {
+	if _, _, err := RegisterLockMetrics(nil); err == nil {
+		t.Fatal("expected nil registerer error")
+	}
+	expectLegacyPanic(t, "registerer must not be nil", func() { NewLockMetrics(nil) })
+	waiting := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "powerlock", Name: "locks_waiting", Help: "Number of goroutines waiting on a lock at a specific location"}, []string{"location"})
+	held := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "powerlock", Name: "locks_held", Help: "Number of goroutines currently holding a lock at a specific location"}, []string{"location"})
+	expectLegacyPanic(t, "both gauges must be supplied together", func() { NewMeteredRWMutex("partial", waiting, nil) })
+	expectLegacyPanic(t, "both gauges must be supplied together", func() { NewMeteredRWMutex("partial", nil, held) })
+}
+
+func TestRegisterLockMetrics_RollsBackWaitingGauge(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	held := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "powerlock", Name: "locks_held", Help: "Number of goroutines currently holding a lock at a specific location"}, []string{"location"})
+	if err := registry.Register(held); err != nil {
+		t.Fatalf("expected held metric setup, got %v", err)
+	}
+	if _, _, err := RegisterLockMetrics(registry); err == nil || !strings.Contains(err.Error(), "register held-lock gauge") {
+		t.Fatalf("expected held metric registration failure, got %v", err)
+	}
+	waiting := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "powerlock", Name: "locks_waiting", Help: "Number of goroutines waiting on a lock at a specific location"}, []string{"location"})
+	if err := registry.Register(waiting); err != nil {
+		t.Fatalf("waiting metric was not rolled back: %v", err)
+	}
+}
+
 func waitForLegacyGauge(t *testing.T, gauge prometheus.Gauge, expected float64) {
 	t.Helper()
 	timer := time.NewTimer(time.Second)
@@ -288,4 +372,18 @@ func waitForLegacyState(t *testing.T, snapshot func() powerlock.LockState, match
 			runtime.Gosched()
 		}
 	}
+}
+
+func expectLegacyPanic(t *testing.T, expected string, operation func()) {
+	t.Helper()
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected operation to panic")
+		}
+		if message := fmt.Sprint(recovered); !strings.Contains(message, expected) {
+			t.Fatalf("panic omitted %q: %s", expected, message)
+		}
+	}()
+	operation()
 }

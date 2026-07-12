@@ -285,3 +285,49 @@ func TestCancelRWMutex_CancelRejectsMixedQueueAndPreservesHolderRelease(t *testi
 		t.Fatalf("unexpected state after mixed cancellation: %+v", state)
 	}
 }
+
+func TestCancelRWMutex_QueuedConvenienceMethodsPanicAfterCancel(t *testing.T) {
+	m := NewCancelRWMutex("queued-cancel")
+	m.Lock()
+	type panicResult struct {
+		mode      LockMode
+		recovered error
+	}
+	results := make(chan panicResult, 2)
+	go func() {
+		defer func() {
+			recovered, _ := recover().(error)
+			results <- panicResult{mode: LockModeWrite, recovered: recovered}
+		}()
+		m.Lock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return state.WaitingWriters == 1 })
+	go func() {
+		defer func() {
+			recovered, _ := recover().(error)
+			results <- panicResult{mode: LockModeRead, recovered: recovered}
+		}()
+		m.RLock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 1 && state.WaitingReaders == 1
+	})
+	m.Cancel()
+	for iteration := 0; iteration < 2; iteration++ {
+		result := <-results
+		if !errors.Is(result.recovered, ErrCancelled) {
+			t.Fatalf("expected queued %s acquisition to panic with ErrCancelled, got %v", result.mode, result.recovered)
+		}
+	}
+	state := m.Snapshot()
+	if !state.Writer || !state.Cancelled || state.WaitingWriters != 0 || state.WaitingReaders != 0 {
+		t.Fatalf("cancellation revoked the holder or retained waiters: %+v", state)
+	}
+	m.Unlock()
+	if err := m.LockContext(context.Background()); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("expected future writer rejection, got %v", err)
+	}
+	if err := m.RLockContext(context.Background()); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("expected future reader rejection, got %v", err)
+	}
+}

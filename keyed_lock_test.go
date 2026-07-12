@@ -171,3 +171,132 @@ func TestKeyGuard_ConcurrentReleaseAllowsExactlyOne(t *testing.T) {
 		t.Fatalf("expected one release and one panic, panics=%d active=%d", panicCount, m.ActiveKeys())
 	}
 }
+
+func TestKeyedMutex_SameKeyAcquiresInFIFOOrderAndCleansUp(t *testing.T) {
+	m := NewKeyedMutex[string]("before")
+	m.SetLocation("accounts")
+	m.Lock("customer-7")
+	type acquisition struct {
+		identifier int
+		err        error
+	}
+	acquired := make(chan acquisition, 2)
+	releases := []chan struct{}{make(chan struct{}), make(chan struct{})}
+	done := make(chan struct{}, len(releases))
+	for index, release := range releases {
+		identifier := index + 1
+		go func() {
+			err := m.LockContext(context.Background(), "customer-7")
+			acquired <- acquisition{identifier: identifier, err: err}
+			if err == nil {
+				<-release
+				m.Unlock("customer-7")
+			}
+			done <- struct{}{}
+		}()
+		waitForLockState(t, func() LockState {
+			state, _ := m.Snapshot("customer-7")
+			return state
+		}, func(state LockState) bool { return state.WaitingWriters == identifier })
+	}
+	if m.ActiveKeys() != 1 {
+		t.Fatalf("expected one shared keyed entry, active=%d", m.ActiveKeys())
+	}
+	m.Unlock("customer-7")
+	for index, release := range releases {
+		observed := <-acquired
+		if observed.err != nil || observed.identifier != index+1 {
+			t.Fatalf("expected acquisition %d, got identifier=%d err=%v", index+1, observed.identifier, observed.err)
+		}
+		close(release)
+	}
+	for range releases {
+		<-done
+	}
+	if m.ActiveKeys() != 0 || m.Name() != "accounts" {
+		t.Fatalf("expected keyed entry cleanup with stable name, name=%q active=%d", m.Name(), m.ActiveKeys())
+	}
+	if state, found := m.Snapshot("customer-7"); found || state.Name != "accounts" {
+		t.Fatalf("unexpected missing-key snapshot: found=%t state=%+v", found, state)
+	}
+	message := panicText(t, func() { m.SetLocation("changed") })
+	if !strings.Contains(message, `current="accounts"`) || !strings.Contains(message, `requested="changed"`) {
+		t.Fatalf("post-use name error omitted identities: %s", message)
+	}
+}
+
+func TestKeyedMutex_CapacityFailuresRetainNoEntries(t *testing.T) {
+	m := NewKeyedMutexWithLimit[string]("accounts", 1)
+	m.Lock("held")
+	if m.TryLock("other") {
+		m.Unlock("other")
+		t.Fatal("expected active-key limit to reject TryLock")
+	}
+	guard, guardErr := m.LockGuard(context.Background(), "other")
+	if guard != nil || !errors.Is(guardErr, ErrMaxKeys) {
+		t.Fatalf("expected guard capacity rejection, guard=%v err=%v", guard, guardErr)
+	}
+	err := m.LockContext(context.Background(), "other")
+	if !errors.Is(err, ErrMaxKeys) || !strings.Contains(err.Error(), `key=other`) || !strings.Contains(err.Error(), `active_keys=1 maximum_keys=1`) {
+		t.Fatalf("unexpected keyed capacity error: %v", err)
+	}
+	if state, found := m.Snapshot("other"); found || state.Name != "accounts" {
+		t.Fatalf("capacity failure retained an entry: found=%t state=%+v", found, state)
+	}
+	message := panicText(t, func() { m.Lock("other") })
+	if !strings.Contains(message, ErrMaxKeys.Error()) {
+		t.Fatalf("blocking capacity panic omitted cause: %s", message)
+	}
+	unknown := panicText(t, func() { m.Unlock("missing") })
+	if !strings.Contains(unknown, `key missing`) || !strings.Contains(unknown, `"accounts"`) {
+		t.Fatalf("unknown-key unlock omitted identity: %s", unknown)
+	}
+	if m.ActiveKeys() != 1 {
+		t.Fatalf("capacity failures changed active key count: %d", m.ActiveKeys())
+	}
+	m.Unlock("held")
+}
+
+func TestKeyedMutex_SameKeyHandoffRetainsDistinctKeyCapacity(t *testing.T) {
+	m := NewKeyedMutexWithLimit[string]("accounts", 1)
+	m.Lock("account-a")
+	waiterAcquired := make(chan error, 1)
+	waiterRelease := make(chan struct{})
+	waiterDone := make(chan struct{})
+	go func() {
+		err := m.LockContext(context.Background(), "account-a")
+		waiterAcquired <- err
+		if err == nil {
+			<-waiterRelease
+			m.Unlock("account-a")
+		}
+		close(waiterDone)
+	}()
+	waitForLockState(t, func() LockState {
+		state, _ := m.Snapshot("account-a")
+		return state
+	}, func(state LockState) bool { return state.WaitingWriters == 1 })
+	if m.ActiveKeys() != 1 {
+		t.Fatalf("same-key waiter consumed another key slot: active=%d", m.ActiveKeys())
+	}
+	if err := m.LockContext(context.Background(), "account-b"); !errors.Is(err, ErrMaxKeys) {
+		t.Fatalf("expected distinct-key capacity rejection before handoff, got %v", err)
+	}
+	m.Unlock("account-a")
+	if err := <-waiterAcquired; err != nil {
+		t.Fatalf("expected same-key waiter to acquire, got %v", err)
+	}
+	if m.TryLock("account-b") {
+		m.Unlock("account-b")
+		t.Fatal("expected handed-off holder to retain the distinct-key slot")
+	}
+	close(waiterRelease)
+	<-waiterDone
+	if !m.TryLock("account-b") {
+		t.Fatal("expected capacity reuse after the final same-key reference exited")
+	}
+	m.Unlock("account-b")
+	if m.ActiveKeys() != 0 {
+		t.Fatalf("expected complete keyed cleanup, active=%d", m.ActiveKeys())
+	}
+}

@@ -100,12 +100,15 @@ func TestObserverGroupAndEmptyGuards(t *testing.T) {
 	if keyedGuard.Key() != "" || keyedGuard.AttemptID() != 0 || !keyedGuard.Released() {
 		t.Fatal("unexpected empty keyed guard readouts")
 	}
+	expectPanic(t, keyedGuard.Unlock)
 }
 
 func TestInvalidConfigurations(t *testing.T) {
 	expectPanic(t, func() { NewMaxRWMutexWithLimit("max", 0) })
+	expectPanic(t, func() { NewMaxMutexWithLimit("max-exclusive", 0) })
 	expectPanic(t, func() { NewKeyedMutexWithLimit[string]("keys", 0) })
 	expectPanic(t, func() { NewWatchdogRWMutex("", nil) })
+	expectPanic(t, func() { NewWatchdogMutex("", nil) })
 	expectPanic(t, func() { NewWatchdogRWMutexWithThresholds("watchdog", -time.Second, 0, nil) })
 }
 
@@ -122,6 +125,30 @@ func TestAdditionalConstructorSurfaces(t *testing.T) {
 	profiles := DefaultProfileObserver()
 	if profiles.WaiterProfileName() == "" || profiles.HolderProfileName() == "" {
 		t.Fatal("expected non-empty pprof profile names")
+	}
+}
+
+func TestLockEventStringRendersKnownAndInvalidDurations(t *testing.T) {
+	event := LockEvent{
+		Name:              "cache",
+		Mode:              LockModeWrite,
+		Kind:              LockEventHoldExceeded,
+		Result:            LockResultAcquired,
+		WaitDuration:      1500 * time.Millisecond,
+		HoldDuration:      2 * time.Second,
+		HoldDurationKnown: true,
+		State:             LockState{Writer: true, WaitingReaders: 2},
+	}
+	formatted := event.String()
+	for _, expected := range []string{`lock="cache"`, "wait=1.5s", "hold=2s", "writer=true", "waiting_readers=2", "caller=unavailable"} {
+		if !strings.Contains(formatted, expected) {
+			t.Fatalf("formatted event omitted %q: %s", expected, formatted)
+		}
+	}
+	event.WaitDuration = -time.Second
+	event.HoldDuration = -time.Second
+	if formatted = event.String(); !strings.Contains(formatted, "wait=invalid") || !strings.Contains(formatted, "hold=invalid") {
+		t.Fatalf("invalid durations were not identified: %s", formatted)
 	}
 }
 
