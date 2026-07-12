@@ -66,7 +66,7 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Set the topics `go`, `golang`, `mutex`, `concurrency`, `debugging`, `observability`, `prometheus`, and `pprof`, then set the homepage to the pkg.go.dev package after release.
 - [x] Tag a `v0.1.0` release after the correctness and documentation gates pass.
 - [x] Ensure the package is rendered and discoverable on pkg.go.dev.
-- [ ] Submit the released project to Awesome Go and announce one polished release with real diagnostic output and measured overhead.
+- [x] Submit the released project to Awesome Go and announce one polished release with real diagnostic output and measured overhead.
 
 ## Publication
 
