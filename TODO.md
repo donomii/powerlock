@@ -33,7 +33,7 @@ Powerlock should become a Go synchronization toolkit that explains which named l
 - [x] Add `FairRWMutex` and `FairMutex` as explicit aliases for the FIFO context-aware implementations.
 - [x] Add `KeyedMutex[K]` with context cancellation, reference-counted entry cleanup, and a configured maximum key count.
 - [x] Add plain exclusive mutex forms for callers that do not need shared readers.
-- [ ] Investigate debug-only lock-order diagnostics that report conflicting acquisition stacks without relying on unsupported runtime behavior.
+- [x] Investigate debug-only lock-order diagnostics. Automatic goroutine inference is unsafe; a future opt-in package would require explicit logical-operation scopes and report cycle-closing acquisition stacks.
 - [ ] Consider guarded read/write upgrade and downgrade only after the core APIs are stable.
 
 Do not add automatic lock expiry, forced unlock, another plain try-lock implementation, spin locks, distributed locks, or a weighted semaphore. Those either violate protected-state safety or duplicate established Go facilities.

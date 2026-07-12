@@ -14,4 +14,10 @@ Start with `sync.Mutex` or `sync.RWMutex`. Choose Powerlock when the lock itself
 
 `ContextMutex`, `FairMutex`, `CancelMutex`, `MaxMutex`, `ObservedMutex`, and `WatchdogMutex` are exclusive-only forms for code that does not need reader sharing.
 
+## Lock-order diagnostics
+
+Powerlock does not infer which locks one goroutine owns. Go exposes no supported current-goroutine identity, so automatic ownership tracking would depend on runtime details that can change and would make reports unreliable.
+
+A future opt-in diagnostic package can instead require an explicit logical-operation scope. Guarded acquisitions would add scope-local ordering edges with acquisition stacks and reject an edge that closes a cycle with a typed conflict report. The design remains deferred because every participating acquisition must carry the scope; partial adoption could otherwise imply safety it cannot provide.
+
 See `BENCHMARKS.md` for measured overhead, `LIMITATIONS.md` for tradeoffs, and `SPEC.md` for exact behavior.

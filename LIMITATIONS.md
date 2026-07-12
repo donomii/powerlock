@@ -7,5 +7,5 @@
 - Observer calls may be concurrent across acquisitions. They must be concurrency-safe, return promptly, not panic, and not acquire or release the lock emitting the callback. Reading `Name` or `Snapshot` is safe.
 - Powerlock annotates watchdog thresholds in the Go execution trace but does not own a runtime trace flight recorder. Applications using the optional callback must start, snapshot, and stop their recorder themselves without blocking the observer call.
 - Lock names become Prometheus labels. Use a stable, bounded set and never use request identifiers, user identifiers, URLs, or other unbounded values as names.
-- Powerlock does not identify goroutine ownership, make locks reentrant, force releases, or recover protected state after an invalid unlock.
+- Powerlock does not identify goroutine ownership, infer lock ordering, make locks reentrant, force releases, or recover protected state after an invalid unlock.
 - Prefer `sync.Mutex` or `sync.RWMutex` when named state, cancellation, bounded waiting, watchdog thresholds, keyed exclusion, or metrics are not needed.
