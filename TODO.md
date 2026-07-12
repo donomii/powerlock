@@ -34,7 +34,7 @@ Powerlock should become a Go synchronization toolkit that explains which named l
 - [x] Add `KeyedMutex[K]` with context cancellation, reference-counted entry cleanup, and a configured maximum key count.
 - [x] Add plain exclusive mutex forms for callers that do not need shared readers.
 - [x] Investigate debug-only lock-order diagnostics. Automatic goroutine inference is unsafe; a future opt-in package would require explicit logical-operation scopes and report cycle-closing acquisition stacks.
-- [ ] Consider guarded read/write upgrade and downgrade only after the core APIs are stable.
+- [x] Consider guarded read/write upgrade and downgrade. Defer both until after v0.1; any future API will be guard-only, with nonblocking sole-reader upgrade and atomic downgrade semantics.
 
 Do not add automatic lock expiry, forced unlock, another plain try-lock implementation, spin locks, distributed locks, or a weighted semaphore. Those either violate protected-state safety or duplicate established Go facilities.
 

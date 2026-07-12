@@ -199,7 +199,7 @@ The adapter package also contains `MeteredRWMutex`, `NewLockMetrics`, and `Regis
 
 ## Unsupported behavior
 
-Powerlock does not force lock release, expire ownership, provide a spin lock, provide distributed exclusion, provide a weighted semaphore, or make a lock reentrant. It does not associate ordinary mutex ownership with a goroutine.
+Powerlock does not force lock release, expire ownership, provide a spin lock, provide distributed exclusion, provide a weighted semaphore, make a lock reentrant, or convert read and write ownership. It does not associate ordinary mutex ownership with a goroutine.
 
 ## Behavioral algorithms
 

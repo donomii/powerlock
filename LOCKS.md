@@ -20,4 +20,10 @@ Powerlock does not infer which locks one goroutine owns. Go exposes no supported
 
 A future opt-in diagnostic package can instead require an explicit logical-operation scope. Guarded acquisitions would add scope-local ordering edges with acquisition stacks and reject an edge that closes a cycle with a typed conflict report. The design remains deferred because every participating acquisition must carry the scope; partial adoption could otherwise imply safety it cannot provide.
 
+## Read/write conversion
+
+Powerlock does not currently upgrade read ownership or downgrade write ownership. A blocking upgrade can deadlock when multiple readers retain their locks while waiting to become the writer, and releasing a read lock before an ordinary write acquisition is not atomic.
+
+If conversion is added after v0.1, it will be guard-only. `TryUpgrade` would retain the read guard on failure and succeed only when that guard is the sole reader and no waiter is queued. `Downgrade` would atomically replace an exact write guard with a read guard. Either successful conversion would use a fresh acquisition identifier so diagnostics continue to pair one mode and hold interval exactly.
+
 See `BENCHMARKS.md` for measured overhead, `LIMITATIONS.md` for tradeoffs, and `SPEC.md` for exact behavior.
