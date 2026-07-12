@@ -70,6 +70,6 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 
 ## Publication
 
-- [ ] Commit the completed local changes when explicitly authorized.
+- [x] Commit the completed local changes when explicitly authorized.
 - [ ] Push the completed release candidate when explicitly authorized.
 - [ ] Create the hosted release and update repository settings when explicitly authorized.
