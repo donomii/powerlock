@@ -1,0 +1,39 @@
+module prometheus observer
+
+data observer
+    registered lock metric families
+    cached metric handles by stable name and mode
+
+operation receive lock event(event)
+    serialize version acceptance and gauge updates for the event lock name
+    if event state version is not older than the latest accepted version
+        record the version
+        set read waiter gauge from event state
+        set write waiter gauge from event state
+        set read holder gauge from event state
+        set write holder gauge from event state
+    if wait started
+        increment contention counter
+    if wait threshold exceeded
+        increment wait-threshold counter
+    if acquired
+        increment acquired result counter
+        observe wait duration
+    if rejected or try failed
+        increment the matching fixed result counter
+        observe wait duration when the attempt had queued
+    if released with exact hold duration
+        observe hold duration
+    if hold threshold exceeded
+        increment hold-threshold counter
+
+operation bind metric handles(name, mode)
+    return existing cached handles when present
+    bind every metric family to the stable name and fixed mode
+    bind acquisition counters to every fixed result
+    cache and return the handles
+
+operation create observer(wait buckets, hold buckets)
+    reject empty bucket sets
+    reject non-finite, zero, negative, or non-increasing boundaries
+    register every metric family or return the exact registration error

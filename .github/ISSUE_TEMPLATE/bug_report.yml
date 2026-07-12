@@ -1,0 +1,41 @@
+name: Bug report
+description: Report incorrect synchronization, diagnostics, metrics, or documentation.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Powerlock version
+      description: Provide the release tag or revision that exhibits the problem.
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Paste the complete output of `go version`.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Describe the ownership, queue, event, metric, or error state that should occur.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed result
+      description: Include complete errors, events, state snapshots, or metric samples.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Deterministic reproducer
+      description: Provide the smallest program or test that coordinates through channels or observable state.
+    validations:
+      required: true

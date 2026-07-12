@@ -1,0 +1,95 @@
+module powerlock
+
+data lock state
+    stable name
+    active reader count
+    active writer state
+    FIFO waiter sequence
+    permanent cancellation state
+    observer and diagnostic thresholds
+    current exact acquisition timing
+
+operation format lock event(event)
+    render event kind, stable name, mode, result, contention, wait and measurable hold duration
+    render current ownership, queue counts, and cancellation state
+    render the first captured caller outside Powerlock, or unavailable
+    return one diagnostic line
+
+operation acquire(lock, mode, context, maximum waiters, exact release requested)
+    reject a context already cancelled or expired
+    reject a permanently cancelled lock
+    if no earlier waiter exists and the requested mode is compatible with current holders
+        grant acquisition
+        report acquisition
+        permit hold-threshold reporting only after the acquisition report is delivered
+        return acquisition identifier
+    if the bounded waiter count has reached its maximum
+        return a queue-full acquisition error containing current state
+    append the acquisition to the FIFO waiter sequence
+    report wait start
+    if the wait threshold is enabled
+        arrange one report if the acquisition remains queued at the threshold
+    wait until the acquisition is granted or its context ends
+    if the context ends before grant
+        remove the waiter
+        grant newly eligible waiters
+        report an elapsed wait threshold that its timer has not yet reported
+        report rejection
+        return an acquisition error containing current state
+    report an elapsed wait threshold that its timer has not yet reported
+    report the completed acquisition and measured wait
+    permit hold-threshold reporting only after the acquisition report is delivered
+    return acquisition identifier
+
+operation grant eligible waiters(lock)
+    reject queued waiters whose contexts have ended
+    if a writer is active
+        grant nobody
+    if readers are active and the first waiter is a writer
+        grant nobody
+    if the first waiter is a writer and no holder is active
+        grant that writer
+    if the first waiter is a reader and no writer is active
+        grant the consecutive readers at the front of the sequence
+
+operation release(lock, mode, optional acquisition identifier)
+    reject a release without matching ownership
+    measure hold duration when the acquisition can be paired exactly
+    prepare an elapsed hold threshold that its timer has not yet reported
+    remove ownership
+    grant eligible waiters
+    if acquired event delivery is pending
+        queue the hold threshold and release events until acquired delivery completes
+    otherwise
+        report the hold threshold when prepared
+        report release with current state
+
+operation cancel lock(lock)
+    mark permanent cancellation
+    remove every queued waiter
+    return a cancellation acquisition error to every removed waiter
+    retain all current ownership until ordinary release
+
+operation try acquire(lock, mode)
+    if permanently cancelled, incompatible ownership, or an earlier waiter exists
+        report failed try
+        return false
+    grant and report acquisition
+    return true
+
+operation acquire keyed lock(keyed lock, key, context)
+    reject a missing, cancelled, or expired context before referencing a key entry
+    find or create the entry for key
+    if a new entry would exceed the active-key maximum
+        return a keyed capacity error
+    increase the entry reference count
+    acquire the entry lock with context
+    if acquisition fails
+        decrease the reference count and remove an unused entry
+    return acquisition result
+
+operation release keyed lock(keyed lock, key)
+    reject an unknown key
+    release the entry lock
+    decrease the reference count
+    remove the entry when its reference count reaches zero

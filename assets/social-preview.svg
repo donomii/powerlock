@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Powerlock</title>
+  <desc id="description">Named Go locks that explain contention, with FIFO queues, watchdog diagnostics, pprof, and Prometheus.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#101a32"/>
+      <stop offset="1" stop-color="#24113d"/>
+    </linearGradient>
+    <linearGradient id="lock" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#56e6ff"/>
+      <stop offset="1" stop-color="#9e7cff"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" rx="32" fill="url(#background)"/>
+  <circle cx="1085" cy="95" r="210" fill="#7a52ff" opacity="0.08"/>
+  <circle cx="215" cy="590" r="260" fill="#2bd9ff" opacity="0.06"/>
+
+  <g opacity="0.22" stroke="#71dfff" stroke-width="2">
+    <path d="M90 112H330M90 166H276M90 220H350"/>
+    <circle cx="90" cy="112" r="6" fill="#71dfff"/>
+    <circle cx="90" cy="166" r="6" fill="#71dfff"/>
+    <circle cx="90" cy="220" r="6" fill="#71dfff"/>
+  </g>
+
+  <g transform="translate(112 250)">
+    <rect x="0" y="88" width="250" height="214" rx="38" fill="#0b1729" stroke="url(#lock)" stroke-width="8"/>
+    <path d="M58 92V68C58-18 192-18 192 68V92" fill="none" stroke="url(#lock)" stroke-width="22" stroke-linecap="round"/>
+    <circle cx="125" cy="185" r="27" fill="url(#lock)" filter="url(#glow)"/>
+    <rect x="116" y="205" width="18" height="48" rx="9" fill="url(#lock)"/>
+  </g>
+
+  <g transform="translate(430 112)" fill="#f5f8ff">
+    <text x="0" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="88" font-weight="750" letter-spacing="-3">Powerlock</text>
+    <text x="2" y="145" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="32" font-weight="500" fill="#b8c9e8">Named Go locks that explain contention.</text>
+  </g>
+
+  <g transform="translate(432 305)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <rect width="748" height="120" rx="22" fill="#07101d" stroke="#263a5d" stroke-width="2"/>
+    <circle cx="34" cy="34" r="7" fill="#ff7c9c"/>
+    <circle cx="58" cy="34" r="7" fill="#ffd166"/>
+    <circle cx="82" cy="34" r="7" fill="#62e6a7"/>
+    <text x="30" y="78" font-size="21" fill="#72e3ff">cache-update</text>
+    <text x="190" y="78" font-size="21" fill="#d8e2f5">write waiting</text>
+    <text x="370" y="78" font-size="21" fill="#ffca6b">2.4s</text>
+    <text x="455" y="78" font-size="21" fill="#b99cff">worker.go:87</text>
+  </g>
+
+  <g transform="translate(432 470)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">
+    <g><rect width="96" height="44" rx="22" fill="#17334a"/><text x="48" y="29" text-anchor="middle" fill="#72e3ff">FIFO</text></g>
+    <g transform="translate(112)"><rect width="128" height="44" rx="22" fill="#25264d"/><text x="64" y="29" text-anchor="middle" fill="#c4b7ff">Context</text></g>
+    <g transform="translate(256)"><rect width="146" height="44" rx="22" fill="#3e243f"/><text x="73" y="29" text-anchor="middle" fill="#ffa6d5">Watchdog</text></g>
+    <g transform="translate(418)"><rect width="98" height="44" rx="22" fill="#193a37"/><text x="49" y="29" text-anchor="middle" fill="#77e6c6">pprof</text></g>
+    <g transform="translate(532)"><rect width="172" height="44" rx="22" fill="#3d2c1d"/><text x="86" y="29" text-anchor="middle" fill="#ffc982">Prometheus</text></g>
+  </g>
+
+  <text x="432" y="585" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#8093b5">github.com/donomii/powerlock</text>
+</svg>

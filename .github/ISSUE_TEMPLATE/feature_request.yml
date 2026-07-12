@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a synchronization behavior or diagnostic capability.
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the concrete synchronization or debugging problem and why existing Powerlock behavior does not address it.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Required behavior
+      description: Define acquisition, release, cancellation, fairness, error, and diagnostic outcomes.
+    validations:
+      required: true
+  - type: textarea
+    id: overhead
+    attributes:
+      label: Acceptable overhead
+      description: State whether the feature is for normal use or diagnostics and what latency or allocation cost is acceptable.
+    validations:
+      required: true

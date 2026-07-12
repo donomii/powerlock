@@ -12,22 +12,18 @@
 package powerlock
 
 import (
-	"sync"
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
 func newTestMaxRWMutex(limit int) *MaxRWMutex {
-	m := &MaxRWMutex{
-		location:   "test",
-		maxWaiting: limit,
-		waiting:    make(chan struct{}, limit),
-	}
-	return m
+	return NewMaxRWMutexWithLimit("test", limit)
 }
 
 func TestMaxRWMutex_BasicLockUnlock(t *testing.T) {
-	m := newTestMaxRWMutex(5) // Give plenty of waiter slots
+	m := newTestMaxRWMutex(5)
 
 	m.Lock()
 	m.Unlock()
@@ -36,195 +32,195 @@ func TestMaxRWMutex_BasicLockUnlock(t *testing.T) {
 	m.RUnlock()
 }
 
-func TestMaxRWMutex_TryLock_Succeeds(t *testing.T) {
+func TestMaxRWMutex_TryLock(t *testing.T) {
 	m := newTestMaxRWMutex(5)
-
-	ok := m.TryLock()
-	if !ok {
+	if !m.TryLock() {
 		t.Fatal("expected TryLock to succeed")
+	}
+	if m.TryLock() {
+		t.Fatal("expected TryLock to fail while locked")
 	}
 	m.Unlock()
 }
 
-func TestMaxRWMutex_TryLock_FailsWhenBusy(t *testing.T) {
+func TestMaxRWMutex_TryRLock(t *testing.T) {
 	m := newTestMaxRWMutex(5)
+	if !m.TryRLock() {
+		t.Fatal("expected TryRLock to succeed")
+	}
+	if !m.TryRLock() {
+		t.Fatal("expected a compatible TryRLock to succeed")
+	}
+	m.RUnlock()
+	m.RUnlock()
 
 	m.Lock()
-	defer m.Unlock()
+	if m.TryRLock() {
+		t.Fatal("expected TryRLock to fail while write locked")
+	}
+	m.Unlock()
+}
 
-	ok := m.TryLock()
-	if ok {
-		t.Fatal("expected TryLock to fail while locked")
+func TestMaxRWMutex_HoldersDoNotConsumeWaiterCapacity(t *testing.T) {
+	m := newTestMaxRWMutex(1)
+	m.RLock()
+	m.RLock()
+	state := m.Snapshot()
+	if state.Readers != 2 || state.WaitingReaders != 0 || state.WaitingWriters != 0 {
+		t.Fatalf("expected two holders and no waiters, got %+v", state)
+	}
+	m.RUnlock()
+	m.RUnlock()
+}
+
+func TestMaxRWMutex_LimitRejectsOnlyExcessBlockedWaiters(t *testing.T) {
+	m := newTestMaxRWMutex(1)
+	m.Lock()
+
+	waiterResult := make(chan error, 1)
+	waiterRelease := make(chan struct{})
+	waiterDone := make(chan struct{})
+	go func() {
+		err := m.LockContext(context.Background())
+		waiterResult <- err
+		if err == nil {
+			<-waiterRelease
+			m.Unlock()
+		}
+		close(waiterDone)
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 1
+	})
+
+	err := m.LockContext(context.Background())
+	if !errors.Is(err, ErrMaxWaiting) {
+		t.Fatalf("expected ErrMaxWaiting, got %v", err)
+	}
+
+	m.Unlock()
+	if err := <-waiterResult; err != nil {
+		t.Fatalf("expected queued acquisition to succeed, got %v", err)
+	}
+	state := m.Snapshot()
+	if !state.Writer || state.WaitingWriters != 0 {
+		t.Fatalf("expected acquired writer and released waiter capacity, got %+v", state)
+	}
+	close(waiterRelease)
+	<-waiterDone
+}
+
+func TestMaxRWMutex_WriterQueuePreventsReaderBypass(t *testing.T) {
+	m := newTestMaxRWMutex(2)
+	m.RLock()
+
+	writerAcquired := make(chan struct{})
+	writerRelease := make(chan struct{})
+	go func() {
+		m.Lock()
+		close(writerAcquired)
+		<-writerRelease
+		m.Unlock()
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 1
+	})
+	if m.TryRLock() {
+		m.RUnlock()
+		t.Fatal("expected TryRLock not to bypass a queued writer")
+	}
+	m.RUnlock()
+	<-writerAcquired
+	close(writerRelease)
+}
+
+func TestMaxRWMutex_CancelledWaiterReleasesCapacity(t *testing.T) {
+	m := newTestMaxRWMutex(1)
+	m.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- m.LockContext(ctx)
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 1
+	})
+	cancel()
+	if err := <-firstResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	secondResult := make(chan error, 1)
+	go func() {
+		err := m.LockContext(context.Background())
+		secondResult <- err
+		if err == nil {
+			m.Unlock()
+		}
+	}()
+	waitForLockState(t, m.Snapshot, func(state LockState) bool {
+		return state.WaitingWriters == 1
+	})
+	m.Unlock()
+	if err := <-secondResult; err != nil {
+		t.Fatalf("expected capacity to be reusable, got %v", err)
 	}
 }
 
-func TestMaxRWMutex_TryRLock_Succeeds(t *testing.T) {
-	m := newTestMaxRWMutex(5)
+func TestMaxRWMutex_ZeroValueUsesDefaultLimit(t *testing.T) {
+	var m MaxRWMutex
+	if m.MaxWaiting() != DefaultMaxWaiting {
+		t.Fatalf("expected default maximum %d, got %d", DefaultMaxWaiting, m.MaxWaiting())
+	}
+	m.Lock()
+	m.Unlock()
+}
 
-	ok := m.TryRLock()
-	if !ok {
+func TestMaxRWMutex_TryRLockAndRLocker(t *testing.T) {
+	m := newTestMaxRWMutex(1)
+	if !m.TryRLock() {
 		t.Fatal("expected TryRLock to succeed")
 	}
 	m.RUnlock()
+
+	reader := m.RLocker()
+	reader.Lock()
+	reader.Unlock()
 }
 
-func TestMaxRWMutex_TryRLock_FailsWhenBusy(t *testing.T) {
-	m := newTestMaxRWMutex(5)
-
-	m.Lock() // block writers and readers
-	defer m.Unlock()
-
-	ok := m.TryRLock()
-	if ok {
-		t.Fatal("expected TryRLock to fail while write locked")
-	}
-}
-
-func TestMaxRWMutex_ParallelReaders(t *testing.T) {
-	m := newTestMaxRWMutex(10) // Large waiter queue
-
-	const numReaders = 5
-	var wg sync.WaitGroup
-
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			m.RLock()
-			time.Sleep(20 * time.Millisecond)
-			m.RUnlock()
-		}(i)
-	}
-
-	wg.Wait()
-}
-
-func TestMaxRWMutex_RTLockAlias(t *testing.T) {
-	m := newTestMaxRWMutex(5)
-
-	ok := m.RTryLock()
-	if !ok {
-		t.Fatal("expected RTryLock to succeed")
-	}
-	m.RUnlock()
-}
-
-// Test that Lock() panics when waiter queue is full
-func TestMaxRWMutex_Lock_PanicsWhenWaiterQueueFull(t *testing.T) {
-	m := newTestMaxRWMutex(1) // Only 1 waiter slot
-
-	// Fill the waiter queue
+func TestMaxRWMutex_RemovesExpiredWaiterBeforeCapacityCheck(t *testing.T) {
+	m := newTestMaxRWMutex(1)
 	m.Lock()
+	staleContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	stale := &rwWaiter{
+		mode:       LockModeWrite,
+		ctx:        staleContext,
+		ready:      make(chan struct{}),
+		queuedAt:   time.Now(),
+		maxWaiting: m.MaxWaiting(),
+	}
+	m.core.mu.Lock()
+	m.core.waiters = append(m.core.waiters, stale)
+	m.core.version++
+	m.core.mu.Unlock()
 
-	// Try to add another - should panic
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected Lock() to panic when waiter queue is full")
-		}
-		if r != ErrMaxWaiting {
-			t.Fatalf("expected panic with ErrMaxWaiting, got %v", r)
+	result := make(chan error, 1)
+	go func() {
+		err := m.LockContext(context.Background())
+		result <- err
+		if err == nil {
+			m.Unlock()
 		}
 	}()
-
-	m.Lock() // This should panic immediately
-}
-
-// Test that RLock() panics when waiter queue is full  
-func TestMaxRWMutex_RLock_PanicsWhenWaiterQueueFull(t *testing.T) {
-	m := newTestMaxRWMutex(1) // Only 1 waiter slot
-
-	// Fill the waiter queue  
-	m.RLock()
-
-	// Try to add another - should panic
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected RLock() to panic when waiter queue is full")
-		}
-		if r != ErrMaxWaiting {
-			t.Fatalf("expected panic with ErrMaxWaiting, got %v", r)
-		}
-	}()
-
-	m.RLock() // This should panic immediately
-}
-
-// Test that TryLock returns false when waiter queue is full
-func TestMaxRWMutex_TryLock_FailsWhenWaiterQueueFull(t *testing.T) {
-	m := newTestMaxRWMutex(1) // Only 1 waiter slot
-
-	// Fill the waiter queue
-	m.Lock()
-	defer m.Unlock()
-
-	// Try to add another with TryLock - should return false
-	ok := m.TryLock()
-	if ok {
-		m.Unlock() // cleanup if somehow succeeded
-		t.Fatal("expected TryLock to fail when waiter queue is full")
+	<-stale.ready
+	var staleErr *AcquisitionError
+	if !errors.As(stale.err, &staleErr) || staleErr.MaxWaiting != m.MaxWaiting() {
+		t.Fatalf("expected expired waiter error to retain maximum=%d, got %+v", m.MaxWaiting(), stale.err)
 	}
-}
-
-// Test that TryRLock returns false when waiter queue is full
-func TestMaxRWMutex_TryRLock_FailsWhenWaiterQueueFull(t *testing.T) {
-	m := newTestMaxRWMutex(1) // Only 1 waiter slot
-
-	// Fill the waiter queue
-	m.RLock()
-	defer m.RUnlock()
-
-	// Try to add another with TryRLock - should return false  
-	ok := m.TryRLock()
-	if ok {
-		m.RUnlock() // cleanup if somehow succeeded
-		t.Fatal("expected TryRLock to fail when waiter queue is full")
-	}
-}
-
-// Test multiple operations with larger waiter queue
-func TestMaxRWMutex_MultipleOperationsWithLimitedQueue(t *testing.T) {
-	m := newTestMaxRWMutex(3) // Allow 3 waiters
-
-	// First operation: read lock (takes one slot and succeeds)
-	m.RLock()
-
-	// Second operation: another read lock should succeed (takes second slot, readers can share)
-	ok := m.TryRLock()
-	if !ok {
-		t.Fatal("expected second TryRLock to succeed - readers should be able to share")
-	}
-
-	// Third operation: another read lock should succeed (takes third slot, readers can share)
-	ok2 := m.TryRLock()
-	if !ok2 {
-		t.Fatal("expected third TryRLock to succeed - readers should be able to share")
-	}
-
-	// Fourth operation: should fail (queue full)
-	ok3 := m.TryLock()
-	if ok3 {
-		m.Unlock()
-		t.Fatal("expected fourth TryLock to fail due to full waiter queue")
-	}
-
-	// Fifth operation: should fail (queue full)
-	ok4 := m.TryRLock()
-	if ok4 {
-		m.RUnlock()
-		t.Fatal("expected fifth TryRLock to fail due to full waiter queue")
-	}
-
-	// Clean up all read locks
-	m.RUnlock() // third operation
-	m.RUnlock() // second operation
-	m.RUnlock() // first operation
-
-	// Now operations should succeed again
-	ok5 := m.TryLock()
-	if !ok5 {
-		t.Fatal("expected TryLock to succeed after queue cleared")
-	}
+	waitForLockState(t, m.Snapshot, func(state LockState) bool { return state.WaitingWriters == 1 })
 	m.Unlock()
+	if err := <-result; err != nil {
+		t.Fatalf("expected replacement waiter to use released capacity, got %v", err)
+	}
 }

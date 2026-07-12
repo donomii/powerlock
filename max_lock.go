@@ -12,94 +12,112 @@
 package powerlock
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"sync"
 )
 
-var ErrMaxWaiting = errors.New("powerlock: too many waiting locks")
+// DefaultMaxWaiting is the waiter limit used by NewMaxRWMutex and the zero value.
+const DefaultMaxWaiting = 1
 
-// MaxRWMutex is a read/write mutex with limited waiters
+// MaxRWMutex is a FIFO read/write mutex that limits blocked acquisitions without limiting current holders.
 type MaxRWMutex struct {
-	rwlock     sync.RWMutex
-	location   string
+	core       rwCore
 	maxWaiting int
-	waiting    chan struct{}
 }
 
+// NewMaxRWMutex returns a bounded lock using DefaultMaxWaiting.
 func NewMaxRWMutex(location string) *MaxRWMutex {
-	const defaultMaxWaiting = 1
-	return &MaxRWMutex{
-		location:   location,
-		maxWaiting: defaultMaxWaiting,
-		waiting:    make(chan struct{}, defaultMaxWaiting),
-	}
+	return NewMaxRWMutexWithLimit(location, DefaultMaxWaiting)
 }
 
+// NewMaxRWMutexWithLimit returns a bounded lock that permits at most maxWaiting blocked acquisitions.
+func NewMaxRWMutexWithLimit(location string, maxWaiting int) *MaxRWMutex {
+	if maxWaiting < 1 {
+		panic(invalidConfiguration(fmt.Sprintf("maximum waiting acquisitions must be at least 1, received=%d", maxWaiting)))
+	}
+
+	m := &MaxRWMutex{maxWaiting: maxWaiting}
+	m.core.configure(location, nil, 0, 0, false)
+	return m
+}
+
+// SetLocation changes the diagnostic name before the first operation and panics after first use.
 func (m *MaxRWMutex) SetLocation(location string) {
-	m.location = location
+	m.core.setName(location)
 }
 
-func (m *MaxRWMutex) tryEnter() error {
-	select {
-	case m.waiting <- struct{}{}:
-		return nil
-	default:
-		return ErrMaxWaiting
-	}
+// Name returns the immutable diagnostic name.
+func (m *MaxRWMutex) Name() string {
+	return m.core.nameValue()
 }
 
-func (m *MaxRWMutex) exit() {
-	<-m.waiting
+// MaxWaiting returns the configured waiter limit.
+func (m *MaxRWMutex) MaxWaiting() int {
+	return m.effectiveMaxWaiting()
 }
 
+// Lock acquires the write lock and panics when the waiter limit has already been reached.
 func (m *MaxRWMutex) Lock() {
-	if err := m.tryEnter(); err != nil {
+	if err := m.LockContext(context.Background()); err != nil {
 		panic(err)
 	}
-	m.rwlock.Lock()
 }
 
+// LockContext acquires the write lock or returns a context or queue-saturation error.
+func (m *MaxRWMutex) LockContext(ctx context.Context) error {
+	_, err := m.core.acquire(ctx, LockModeWrite, m.effectiveMaxWaiting(), false)
+	return err
+}
+
+// TryLock attempts to acquire the write lock without joining the waiter queue.
 func (m *MaxRWMutex) TryLock() bool {
-	if err := m.tryEnter(); err != nil {
-		return false
-	}
-	ok := m.rwlock.TryLock()
-	if !ok {
-		m.exit()
-		return false
-	}
-	return true
+	_, acquired := m.core.tryAcquire(LockModeWrite, false)
+	return acquired
 }
 
+// Unlock releases the write lock.
 func (m *MaxRWMutex) Unlock() {
-	m.rwlock.Unlock()
-	m.exit()
+	m.core.release(LockModeWrite, 0)
 }
 
+// RLock acquires a read lock and panics when the waiter limit has already been reached.
 func (m *MaxRWMutex) RLock() {
-	if err := m.tryEnter(); err != nil {
+	if err := m.RLockContext(context.Background()); err != nil {
 		panic(err)
 	}
-	m.rwlock.RLock()
 }
 
+// RLockContext acquires a read lock or returns a context or queue-saturation error.
+func (m *MaxRWMutex) RLockContext(ctx context.Context) error {
+	_, err := m.core.acquire(ctx, LockModeRead, m.effectiveMaxWaiting(), false)
+	return err
+}
+
+// TryRLock attempts to acquire a read lock without joining or bypassing the waiter queue.
 func (m *MaxRWMutex) TryRLock() bool {
-	if err := m.tryEnter(); err != nil {
-		return false
-	}
-	ok := m.rwlock.TryRLock()
-	if !ok {
-		m.exit()
-		return false
-	}
-	return true
+	_, acquired := m.core.tryAcquire(LockModeRead, false)
+	return acquired
 }
 
-func (m *MaxRWMutex) RTryLock() bool {
-	return m.TryRLock()
-}
-
+// RUnlock releases one read lock.
 func (m *MaxRWMutex) RUnlock() {
-	m.rwlock.RUnlock()
-	m.exit()
+	m.core.release(LockModeRead, 0)
+}
+
+// RLocker returns a sync.Locker backed by RLock and RUnlock.
+func (m *MaxRWMutex) RLocker() sync.Locker {
+	return rwReadLocker{lock: m}
+}
+
+// Snapshot returns the current lock state.
+func (m *MaxRWMutex) Snapshot() LockState {
+	return m.core.snapshot()
+}
+
+func (m *MaxRWMutex) effectiveMaxWaiting() int {
+	if m.maxWaiting == 0 {
+		return DefaultMaxWaiting
+	}
+	return m.maxWaiting
 }

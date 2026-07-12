@@ -9,91 +9,52 @@
 //  CONTACT: hello@weaviate.io
 //
 
-// Package powerlock provides a read/write mutex with Prometheus-based metering of lock usage.
-// It allows observability into how many goroutines are waiting or holding a lock at specific locations.
 package powerlock
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// MeteredRWMutex is a read/write mutex with metering for lock usage.  It provides insight into how many threads are waiting on each lock, and how many are currently holding the lock (or read lock).
+// MeteredRWMutex is a FIFO context-aware read/write lock with legacy Prometheus gauges.
 type MeteredRWMutex struct {
-	rwlock       sync.RWMutex
-	location     string
+	configuredRWMutex
 	locksWaiting *prometheus.GaugeVec
 	locks        *prometheus.GaugeVec
 }
 
+// NewMeteredRWMutex returns a metered lock. Supplying two nil gauges creates an unobserved lock.
 func NewMeteredRWMutex(location string, locksWaiting *prometheus.GaugeVec, locks *prometheus.GaugeVec) *MeteredRWMutex {
-	return &MeteredRWMutex{
-		location:     location,
+	m := &MeteredRWMutex{
 		locksWaiting: locksWaiting,
 		locks:        locks,
 	}
+	m.core.configure(location, m.legacyObserver(location), 0, 0, false)
+	return m
 }
 
-// SetLocation updates the lock location label for metric reporting.
+// SetLocation changes the metric name before the first operation and panics after first use.
 func (m *MeteredRWMutex) SetLocation(location string) {
-	m.location = location
-}
-
-// Lock acquires the write lock and updates the Prometheus metrics.
-func (m *MeteredRWMutex) Lock() {
-	m.locksWaiting.WithLabelValues(m.location).Inc()
-	m.rwlock.Lock()
-	m.locksWaiting.WithLabelValues(m.location).Dec()
-	m.locks.WithLabelValues(m.location).Inc()
-}
-
-// TryLock attempts to acquire the write lock and updates the metrics if successful.
-func (m *MeteredRWMutex) TryLock() bool {
-	ok := m.rwlock.TryLock()
-	if ok {
-		m.locks.WithLabelValues(m.location).Inc()
-	}
-	return ok
-}
-
-// Unlock releases the write lock and updates the metrics.
-func (m *MeteredRWMutex) Unlock() {
-	m.locks.WithLabelValues(m.location).Dec()
-	m.rwlock.Unlock()
-}
-
-// RLock acquires the read lock and updates the Prometheus metrics.
-func (m *MeteredRWMutex) RLock() {
-	m.locksWaiting.WithLabelValues(m.location).Inc()
-	m.rwlock.RLock()
-	m.locksWaiting.WithLabelValues(m.location).Dec()
-	m.locks.WithLabelValues(m.location).Inc()
-}
-
-// TryRLock attempts to acquire the read lock and updates the metrics if successful.
-func (m *MeteredRWMutex) TryRLock() bool {
-	ok := m.rwlock.TryRLock()
-	if ok {
-		m.locks.WithLabelValues(m.location).Inc()
-	}
-	return ok
-}
-
-// RTryLock is an alias for TryRLock.
-func (m *MeteredRWMutex) RTryLock() bool {
-	return m.TryRLock()
-}
-
-// RUnlock releases the read lock and updates the metrics.
-func (m *MeteredRWMutex) RUnlock() {
-	m.locks.WithLabelValues(m.location).Dec()
-	m.rwlock.RUnlock()
+	m.core.configure(location, m.legacyObserver(location), 0, 0, false)
 }
 
 // NewLockMetrics creates the Prometheus metrics needed for MeteredRWMutex.
-// It registers them with the provided Prometheus registerer (e.g., prometheus.DefaultRegisterer).
+// It panics when registration fails; RegisterLockMetrics provides the error-returning form.
 func NewLockMetrics(registerer prometheus.Registerer) (*prometheus.GaugeVec, *prometheus.GaugeVec) {
+	locksWaiting, locks, err := RegisterLockMetrics(registerer)
+	if err != nil {
+		panic(err)
+	}
+	return locksWaiting, locks
+}
+
+// RegisterLockMetrics creates and registers the legacy MeteredRWMutex gauges.
+func RegisterLockMetrics(registerer prometheus.Registerer) (*prometheus.GaugeVec, *prometheus.GaugeVec, error) {
+	if registerer == nil {
+		return nil, nil, invalidConfiguration("Prometheus registerer must not be nil")
+	}
 	locksWaiting := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "powerlock",
 		Name:      "locks_waiting",
@@ -106,7 +67,47 @@ func NewLockMetrics(registerer prometheus.Registerer) (*prometheus.GaugeVec, *pr
 		Help:      "Number of goroutines currently holding a lock at a specific location",
 	}, []string{"location"})
 
-	registerer.MustRegister(locksWaiting, locks)
+	if err := registerer.Register(locksWaiting); err != nil {
+		return nil, nil, fmt.Errorf("powerlock: register waiting-lock gauge: %w", err)
+	}
+	if err := registerer.Register(locks); err != nil {
+		registerer.Unregister(locksWaiting)
+		return nil, nil, fmt.Errorf("powerlock: register held-lock gauge: %w", err)
+	}
+	return locksWaiting, locks, nil
+}
 
-	return locksWaiting, locks
+func (m *MeteredRWMutex) legacyObserver(location string) LockObserver {
+	if m.locksWaiting == nil && m.locks == nil {
+		return nil
+	}
+	if m.locksWaiting == nil || m.locks == nil {
+		panic(invalidConfiguration(fmt.Sprintf("both legacy Prometheus gauges must be supplied together: waiting_nil=%t held_nil=%t", m.locksWaiting == nil, m.locks == nil)))
+	}
+	return &legacyPrometheusObserver{
+		waiting: m.locksWaiting.WithLabelValues(location),
+		held:    m.locks.WithLabelValues(location),
+	}
+}
+
+type legacyPrometheusObserver struct {
+	waiting prometheus.Gauge
+	held    prometheus.Gauge
+	mu      sync.Mutex
+	version uint64
+}
+
+func (o *legacyPrometheusObserver) ObserveLock(event LockEvent) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if event.State.Version < o.version {
+		return
+	}
+	o.version = event.State.Version
+	o.waiting.Set(float64(event.State.WaitingReaders + event.State.WaitingWriters))
+	held := event.State.Readers
+	if event.State.Writer {
+		held++
+	}
+	o.held.Set(float64(held))
 }

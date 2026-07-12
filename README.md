@@ -5,6 +5,7 @@ This repository contains alternative lock implementations to help with debugging
 - **CancelRWMutex** - Cancellable locks that can reject all current and future waiters
 - **MaxRWMutex** - Locks that limit the number of waiting goroutines
 - **MeteredRWMutex** - Prometheus-instrumented locks for observability
+- **ContextRWMutex** - Locks that return when a context is cancelled or times out
 
 ## Overview
 
@@ -12,7 +13,7 @@ A Go library providing enhanced read-write mutex implementations with advanced f
 
 ## Features
 
-This library offers three specialized mutex types, each addressing different concurrent programming challenges:
+This library offers four specialized mutex types, each addressing different concurrent programming challenges:
 
 ### CancelRWMutex - Cancellable Locking
 
@@ -59,7 +60,7 @@ A read-write mutex that limits the number of goroutines that can wait for the lo
 
 **Usage:**
 ```go
-mutex := powerlock.NewMaxRWMutex("api-handler")
+mutex := powerlock.NewMaxRWMutexWithLimit("api-handler", 64)
 
 // Will fail immediately if too many goroutines are already waiting
 if mutex.TryLock() {
@@ -70,6 +71,8 @@ if mutex.TryLock() {
 }
 ```
 
+`NewMaxRWMutex(location)` uses a default limit of 1.
+
 ### MeteredRWMutex - Prometheus Monitoring
 
 A read-write mutex instrumented with Prometheus metrics for observability into lock contention and usage patterns.
@@ -78,7 +81,7 @@ A read-write mutex instrumented with Prometheus metrics for observability into l
 - Tracks number of goroutines waiting for locks
 - Monitors number of goroutines currently holding locks
 - Location-based labeling for detailed analysis
-- Zero-overhead when metrics are not collected
+- Prometheus gauge updates on every lock and unlock path
 
 **Usage:**
 ```go
@@ -94,10 +97,33 @@ defer mutex.Unlock()
 // Metrics automatically updated during lock operations
 ```
 
+### ContextRWMutex - Context-Aware Locking
+
+A read-write mutex whose blocking lock operations return if the supplied context is cancelled or reaches its deadline.
+
+**Key capabilities:**
+- `LockContext(ctx)` and `RLockContext(ctx)` return `ctx.Err()` instead of blocking forever
+- `Lock()` and `RLock()` remain available for standard blocking use
+- Non-blocking try-lock operations for both read and write locks
+
+**Usage:**
+```go
+mutex := powerlock.NewContextRWMutex("request-state")
+
+ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+defer cancel()
+
+if err := mutex.LockContext(ctx); err != nil {
+    // Handle timeout or cancellation
+    return
+}
+defer mutex.Unlock()
+```
+
 ## Installation
 
 ```bash
-go get powerlock
+go get github.com/donomii/powerlock
 ```
 
 ## Requirements
@@ -110,6 +136,7 @@ go get powerlock
 - **CancelRWMutex**: Graceful shutdown scenarios, resource cleanup, or any situation where you need to cancel pending operations
 - **MaxRWMutex**: High-throughput services where you want to prevent lock queue buildup
 - **MeteredRWMutex**: Production systems requiring observability into lock contention patterns
+- **ContextRWMutex**: Request-scoped work where waiting for a lock must respect cancellation and deadlines
 
 ## Common Interface
 
@@ -123,3 +150,19 @@ Each type extends this base interface with its specialized capabilities:
 - **CancelRWMutex** adds: `Cancel()` method for rejecting waiters
 - **MaxRWMutex** adds: waiter limiting behavior
 - **MeteredRWMutex** adds: automatic Prometheus metrics collection
+- **ContextRWMutex** adds: `LockContext(context.Context)` and `RLockContext(context.Context)`
+
+## Examples
+
+```bash
+go run ./examples/cancel
+go run ./examples/max
+go run ./examples/metrics
+go run ./examples/context
+```
+
+## Benchmarks
+
+```bash
+go test -bench=.
+```
