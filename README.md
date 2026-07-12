@@ -29,7 +29,7 @@ A read-write mutex that can be cancelled to reject all current and future lock a
 
 **Usage:**
 ```go
-import "powerlock"
+import "github.com/donomii/powerlock"
 
 mutex := powerlock.NewCancelRWMutex("database-access")
 
@@ -125,12 +125,12 @@ defer mutex.Unlock()
 ## Installation
 
 ```bash
-go get github.com/donomii/powerlock
+go get github.com/donomii/powerlock@latest
 ```
 
 ## Requirements
 
-- Go 1.24.2 or later
+- Go 1.23 or later
 - Prometheus client library (for MeteredRWMutex)
 
 ## Use Cases
