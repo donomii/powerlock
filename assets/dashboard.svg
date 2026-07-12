@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">Powerlock diagnostic dashboard</title>
+  <desc id="description">An example Prometheus dashboard showing a synthetic lock contention incident with queued acquisitions, wait duration, contentions, lock state, and an actionable watchdog event.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.58" stop-color="#0d1830"/>
+      <stop offset="1" stop-color="#211238"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#56e6ff"/>
+      <stop offset="1" stop-color="#9e7cff"/>
+    </linearGradient>
+    <linearGradient id="waitArea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9e7cff" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#9e7cff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="900" rx="28" fill="url(#background)"/>
+  <circle cx="1470" cy="20" r="260" fill="#7a52ff" opacity="0.06"/>
+  <circle cx="60" cy="850" r="300" fill="#2bd9ff" opacity="0.04"/>
+
+  <g transform="translate(50 42)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <g transform="translate(0 2)">
+      <rect x="0" y="18" width="42" height="34" rx="8" fill="none" stroke="url(#accent)" stroke-width="4"/>
+      <path d="M10 20V13C10-3 32-3 32 13V20" fill="none" stroke="url(#accent)" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="21" cy="34" r="5" fill="url(#accent)"/>
+    </g>
+    <text x="62" y="36" fill="#f5f8ff" font-size="30" font-weight="500">Powerlock</text>
+    <text x="214" y="36" fill="#8196bb" font-size="22">/ Lock health</text>
+    <g transform="translate(1192 4)">
+      <rect width="258" height="42" rx="21" fill="#182743" stroke="#304669"/>
+      <circle cx="22" cy="21" r="5" fill="#ffca6b"/>
+      <text x="38" y="27" fill="#cbd7ed" font-size="16">Example synthetic incident</text>
+    </g>
+  </g>
+
+  <g transform="translate(50 110)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <g>
+      <rect width="352" height="112" rx="18" fill="#0a1526" stroke="#243858"/>
+      <text x="22" y="30" fill="#8196bb" font-size="15">QUEUED ACQUISITIONS</text>
+      <text x="22" y="78" fill="#f5f8ff" font-size="42" font-weight="500">7</text>
+      <text x="72" y="76" fill="#ffca6b" font-size="16">+6 during incident</text>
+      <text x="22" y="99" fill="#62799f" font-size="13">powerlock_waiting</text>
+    </g>
+    <g transform="translate(382)">
+      <rect width="352" height="112" rx="18" fill="#0a1526" stroke="#243858"/>
+      <text x="22" y="30" fill="#8196bb" font-size="15">OLDEST WAIT</text>
+      <text x="22" y="78" fill="#f5f8ff" font-size="42" font-weight="500">2.4s</text>
+      <text x="121" y="76" fill="#b99cff" font-size="16">write · cache-update</text>
+      <text x="22" y="99" fill="#62799f" font-size="13">powerlock_wait_duration_seconds</text>
+    </g>
+    <g transform="translate(764)">
+      <rect width="352" height="112" rx="18" fill="#0a1526" stroke="#243858"/>
+      <text x="22" y="30" fill="#8196bb" font-size="15">EXACT HOLD P95</text>
+      <text x="22" y="78" fill="#f5f8ff" font-size="42" font-weight="500">640ms</text>
+      <text x="164" y="76" fill="#72e3ff" font-size="16">write</text>
+      <text x="22" y="99" fill="#62799f" font-size="13">powerlock_hold_duration_seconds</text>
+    </g>
+    <g transform="translate(1146)">
+      <rect width="354" height="112" rx="18" fill="#0a1526" stroke="#243858"/>
+      <text x="22" y="30" fill="#8196bb" font-size="15">THRESHOLD EVENTS</text>
+      <text x="22" y="78" fill="#f5f8ff" font-size="42" font-weight="500">2</text>
+      <text x="72" y="76" fill="#ff8fba" font-size="16">last 5 minutes</text>
+      <text x="22" y="99" fill="#62799f" font-size="13">wait + exact hold</text>
+    </g>
+  </g>
+
+  <g transform="translate(50 250)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect width="960" height="330" rx="18" fill="#091424" stroke="#243858"/>
+    <text x="24" y="34" fill="#eaf1ff" font-size="19" font-weight="500">Queued acquisitions</text>
+    <text x="24" y="56" fill="#7186aa" font-size="13">powerlock_waiting{name="cache-update", mode}</text>
+    <g transform="translate(734 24)" font-size="13">
+      <circle cx="6" cy="6" r="5" fill="#56e6ff"/>
+      <text x="18" y="11" fill="#aebddb">read</text>
+      <circle cx="86" cy="6" r="5" fill="#9e7cff"/>
+      <text x="98" y="11" fill="#aebddb">write</text>
+    </g>
+
+    <g transform="translate(70 82)">
+      <g stroke="#1d2d49" stroke-width="1">
+        <path d="M0 0H850M0 52H850M0 104H850M0 156H850M0 208H850"/>
+        <path d="M0 0V208M170 0V208M340 0V208M510 0V208M680 0V208M850 0V208"/>
+      </g>
+      <g fill="#63789d" font-size="12">
+        <text x="-18" y="212">0</text>
+        <text x="-18" y="160">2</text>
+        <text x="-18" y="108">4</text>
+        <text x="-18" y="56">6</text>
+        <text x="-18" y="4">8</text>
+        <text x="0" y="232">−60s</text>
+        <text x="157" y="232">−48s</text>
+        <text x="327" y="232">−36s</text>
+        <text x="497" y="232">−24s</text>
+        <text x="667" y="232">−12s</text>
+        <text x="829" y="232">now</text>
+      </g>
+      <path d="M0 208L0 208L70 208L105 182L145 208L230 208L280 182L320 208L390 208L430 182L475 208L520 182L555 156L590 104L625 52L660 26L700 78L735 104L770 78L810 52L850 26L850 208Z" fill="url(#waitArea)"/>
+      <path d="M0 208L70 208L105 182L145 208L230 208L280 182L320 208L390 208L430 182L475 208L520 182L555 156L590 104L625 52L660 26L700 78L735 104L770 78L810 52L850 26" fill="none" stroke="#9e7cff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M0 182L90 182L130 156L190 182L260 182L305 156L350 182L470 182L515 156L580 182L640 156L690 182L740 156L790 182L850 156" fill="none" stroke="#56e6ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="850" cy="26" r="6" fill="#9e7cff" stroke="#091424" stroke-width="3"/>
+      <circle cx="850" cy="156" r="6" fill="#56e6ff" stroke="#091424" stroke-width="3"/>
+      <g transform="translate(696 4)">
+        <rect width="134" height="30" rx="15" fill="#302650" stroke="#7058ba"/>
+        <text x="67" y="20" text-anchor="middle" fill="#ded4ff" font-size="12">5 write · 2 read</text>
+      </g>
+    </g>
+  </g>
+
+  <g transform="translate(1030 250)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect width="520" height="330" rx="18" fill="#091424" stroke="#4b3159"/>
+    <g transform="translate(24 22)">
+      <rect width="212" height="30" rx="15" fill="#3e243f"/>
+      <circle cx="18" cy="15" r="5" fill="#ff8fba"/>
+      <text x="32" y="20" fill="#ffc0dc" font-size="12" font-weight="500">WAIT THRESHOLD EXCEEDED</text>
+    </g>
+    <text x="24" y="82" fill="#f5f8ff" font-size="25" font-weight="500">cache-update</text>
+    <text x="478" y="82" text-anchor="end" fill="#ffca6b" font-size="25" font-weight="500">2.4s</text>
+    <g transform="translate(24 106)" font-size="14">
+      <text x="0" y="0" fill="#7186aa">MODE</text><text x="0" y="24" fill="#dce6f8">write</text>
+      <text x="118" y="0" fill="#7186aa">OWNER</text><text x="118" y="24" fill="#dce6f8">writer</text>
+      <text x="236" y="0" fill="#7186aa">QUEUE</text><text x="236" y="24" fill="#dce6f8">5 write · 2 read</text>
+      <text x="0" y="66" fill="#7186aa">FIRST EXTERNAL CALLER</text>
+      <text x="0" y="91" fill="#b99cff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">main.refreshCache (worker.go:87)</text>
+    </g>
+    <g transform="translate(24 222)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">
+      <rect width="472" height="84" rx="12" fill="#060e19" stroke="#1f3150"/>
+      <text x="14" y="22" fill="#72e3ff">powerlock event=wait_exceeded lock="cache-update"</text>
+      <text x="14" y="43" fill="#cbd7ed">mode=write result=busy contended=true wait=2.4s</text>
+      <text x="14" y="64" fill="#91a4c4">readers=0 writer=true waiting_readers=2 waiting_writers=5</text>
+    </g>
+  </g>
+
+  <g transform="translate(50 600)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect width="720" height="270" rx="18" fill="#091424" stroke="#243858"/>
+    <text x="24" y="34" fill="#eaf1ff" font-size="19" font-weight="500">Contentions by lock</text>
+    <text x="24" y="56" fill="#7186aa" font-size="13">increase(powerlock_contentions_total[5m])</text>
+    <g transform="translate(24 83)" font-size="14">
+      <text x="0" y="16" fill="#cbd7ed">cache-update</text>
+      <rect x="142" y="0" width="500" height="20" rx="10" fill="#162641"/>
+      <rect x="142" y="0" width="500" height="20" rx="10" fill="#9e7cff"/>
+      <text x="654" y="16" fill="#dce6f8">42</text>
+      <text x="0" y="58" fill="#cbd7ed">index-commit</text>
+      <rect x="142" y="42" width="500" height="20" rx="10" fill="#162641"/>
+      <rect x="142" y="42" width="226" height="20" rx="10" fill="#6f65c6"/>
+      <text x="654" y="58" fill="#dce6f8">19</text>
+      <text x="0" y="100" fill="#cbd7ed">tenant-state</text>
+      <rect x="142" y="84" width="500" height="20" rx="10" fill="#162641"/>
+      <rect x="142" y="84" width="131" height="20" rx="10" fill="#5060a4"/>
+      <text x="654" y="100" fill="#dce6f8">11</text>
+      <text x="0" y="142" fill="#cbd7ed">config-reload</text>
+      <rect x="142" y="126" width="500" height="20" rx="10" fill="#162641"/>
+      <rect x="142" y="126" width="48" height="20" rx="10" fill="#35557d"/>
+      <text x="654" y="142" fill="#dce6f8">4</text>
+    </g>
+  </g>
+
+  <g transform="translate(790 600)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect width="760" height="270" rx="18" fill="#091424" stroke="#243858"/>
+    <text x="24" y="34" fill="#eaf1ff" font-size="19" font-weight="500">Current named lock state</text>
+    <text x="24" y="56" fill="#7186aa" font-size="13">powerlock_held + powerlock_waiting</text>
+    <g transform="translate(24 82)" font-size="13">
+      <g fill="#7186aa">
+        <text x="0" y="0">LOCK</text><text x="220" y="0">OWNER</text><text x="350" y="0">QUEUED</text><text x="460" y="0">OLDEST WAIT</text><text x="600" y="0">SIGNAL</text>
+      </g>
+      <path d="M0 16H712M0 58H712M0 100H712M0 142H712" stroke="#1d2d49"/>
+      <g fill="#d7e1f4">
+        <text x="0" y="44">cache-update</text><text x="220" y="44">write</text><text x="350" y="44">7</text><text x="460" y="44">2.4s</text>
+        <text x="0" y="86">index-commit</text><text x="220" y="86">2 readers</text><text x="350" y="86">1</text><text x="460" y="86">180ms</text>
+        <text x="0" y="128">tenant-state</text><text x="220" y="128">free</text><text x="350" y="128">0</text><text x="460" y="128">—</text>
+        <text x="0" y="170">config-reload</text><text x="220" y="170">write</text><text x="350" y="170">0</text><text x="460" y="170">—</text>
+      </g>
+      <g>
+        <rect x="590" y="25" width="122" height="25" rx="12" fill="#3e243f"/><text x="651" y="42" text-anchor="middle" fill="#ffc0dc">wait threshold</text>
+        <rect x="616" y="67" width="96" height="25" rx="12" fill="#17333b"/><text x="664" y="84" text-anchor="middle" fill="#83dfda">normal</text>
+        <rect x="616" y="109" width="96" height="25" rx="12" fill="#17333b"/><text x="664" y="126" text-anchor="middle" fill="#83dfda">normal</text>
+        <rect x="616" y="151" width="96" height="25" rx="12" fill="#17333b"/><text x="664" y="168" text-anchor="middle" fill="#83dfda">normal</text>
+      </g>
+    </g>
+  </g>
+</svg>

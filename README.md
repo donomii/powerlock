@@ -13,6 +13,8 @@ This repository contains alternative lock implementations to help with debugging
 
 A Go library providing enhanced read-write mutex implementations with advanced features for monitoring, debugging, and resource management.
 
+![Example Powerlock Prometheus dashboard](assets/dashboard.png)
+
 See [Choosing a lock](LOCKS.md) for a side-by-side comparison of failure behavior, observation, and zero-value support.
 
 ## Features
