@@ -6,7 +6,7 @@ This repository contains alternative lock implementations to help with debugging
 - **MaxRWMutex** - Locks that limit the number of waiting goroutines
 - **ContextRWMutex** - Locks that return when a context is cancelled or times out
 - **ObservedRWMutex** - Structured acquisition, release, contention, and rejection events
-- **WatchdogRWMutex** - Wait and hold threshold diagnostics with acquisition stacks
+- **WatchdogRWMutex** - Reports slow lock acquisitions and long-held locks, including where they originated
 - **KeyedMutex** - Independent exclusion by comparable key with bounded key counts
 
 ## Overview
