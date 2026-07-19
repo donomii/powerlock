@@ -61,7 +61,8 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Identify the exact imported upstream revisions and make source notices consistent before release.
 - [x] Add a diagnostic demonstration.
 - [x] Add editable and 1280×640 PNG social-preview assets under `assets/`.
-- [ ] Add a dashboard image and upload `assets/social-preview.png` in the repository settings.
+- [x] Add a dashboard image.
+- [ ] Upload `assets/social-preview.png` in the repository settings.
 - [x] Change the repository description to “Named FIFO Go locks with context cancellation, bounded queues, watchdog diagnostics, pprof, and Prometheus metrics.”
 - [x] Set the topics `go`, `golang`, `mutex`, `concurrency`, `debugging`, `observability`, `prometheus`, and `pprof`, then set the homepage to the pkg.go.dev package after release.
 - [x] Tag a `v0.1.0` release after the correctness and documentation gates pass.
@@ -72,4 +73,4 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 
 - [x] Commit the completed local changes when explicitly authorized.
 - [x] Push the completed release candidate when explicitly authorized.
-- [ ] Create the hosted release and update repository settings when explicitly authorized.
+- [x] Create the hosted release and update repository settings when explicitly authorized.
