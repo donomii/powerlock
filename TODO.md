@@ -61,7 +61,7 @@ Do not add automatic lock expiry, forced unlock, another plain try-lock implemen
 - [x] Identify the exact imported upstream revisions and make source notices consistent before release.
 - [x] Add a diagnostic demonstration.
 - [x] Add editable and 1280×640 PNG social-preview assets under `assets/`.
-- [x] Add a dashboard image.
+- [x] Remove the fabricated dashboard preview. Any future dashboard image must be captured from a running Powerlock-backed dashboard and must show real data.
 - [ ] Upload `assets/social-preview.png` in the repository settings.
 - [x] Change the repository description to “Named FIFO Go locks with context cancellation, bounded queues, watchdog diagnostics, pprof, and Prometheus metrics.”
 - [x] Set the topics `go`, `golang`, `mutex`, `concurrency`, `debugging`, `observability`, `prometheus`, and `pprof`, then set the homepage to the pkg.go.dev package after release.
