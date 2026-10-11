@@ -3,6 +3,7 @@ package powerlock
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 )
@@ -15,7 +16,8 @@ type keyedLockEntry struct {
 	references int
 }
 
-// KeyedMutex serializes work by comparable key and removes entries after their last holder or waiter exits.
+// KeyedMutex serializes work by key and removes entries after their last holder or waiter exits.
+// Keys must be comparable and equal to themselves.
 type KeyedMutex[K comparable] struct {
 	mu      sync.Mutex
 	name    string
@@ -77,14 +79,14 @@ func (m *KeyedMutex[K]) ActiveKeys() int {
 	return len(m.entries)
 }
 
-// Lock acquires the lock for key and panics when the active-key limit has been reached.
+// Lock acquires the lock for key and panics when the key is invalid or the active-key limit has been reached.
 func (m *KeyedMutex[K]) Lock(key K) {
 	if err := m.LockContext(context.Background(), key); err != nil {
 		panic(err)
 	}
 }
 
-// LockContext acquires the lock for key or returns a context or active-key-capacity error.
+// LockContext acquires the lock for key or returns a context, invalid-key, or active-key-capacity error.
 func (m *KeyedMutex[K]) LockContext(ctx context.Context, key K) error {
 	if err := m.contextError(ctx, key); err != nil {
 		return err
@@ -198,6 +200,12 @@ func (m *KeyedMutex[K]) referenceEntry(key K) (*keyedLockEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.used = true
+	if !keyIsReflexive(key) {
+		cause := invalidConfiguration("keyed lock keys must be comparable and equal to themselves")
+		return nil, &KeyedAcquisitionError[K]{
+			Name: m.name, Key: key, MaxKeys: m.effectiveMaxKeysLocked(), ActiveKeys: len(m.entries), Cause: cause,
+		}
+	}
 	if m.entries == nil {
 		m.entries = make(map[K]*keyedLockEntry)
 	}
@@ -226,7 +234,13 @@ func (m *KeyedMutex[K]) contextError(ctx context.Context, key K) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.used = true
-	acquisitionErr := newAcquisitionError(m.name, LockModeWrite, cause, unlimitedWaiters, LockState{Name: m.name})
+	state := LockState{Name: m.name}
+	if keyIsReflexive(key) {
+		if entry := m.entries[key]; entry != nil {
+			state = entry.core.snapshot()
+		}
+	}
+	acquisitionErr := newAcquisitionError(m.name, LockModeWrite, cause, unlimitedWaiters, state)
 	return &KeyedAcquisitionError[K]{
 		Name:       m.name,
 		Key:        key,
@@ -275,4 +289,9 @@ func (m *KeyedMutex[K]) effectiveMaxKeysLocked() int {
 		return DefaultMaxKeys
 	}
 	return m.maxKeys
+}
+
+func keyIsReflexive[K comparable](key K) bool {
+	value := reflect.ValueOf(&key).Elem()
+	return value.Comparable() && key == key
 }
