@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Reject invalid keyed-lock keys before they consume capacity, and include existing ownership and queue state in pre-cancelled acquisition errors.
+- Add stable first-use lock identities so replacement locks can reuse metric names without stale gauge updates.
+- Preserve aggregate waiter and holder gauges across legacy metered locks sharing a location.
+- Measure snapshot and diagnostic durations after acquiring the state lock to prevent negative elapsed times.
+
 ## v0.1.0 - 2026-07-11
 
 - Correct bounded waiting so current holders do not consume waiter capacity.

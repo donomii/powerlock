@@ -164,10 +164,12 @@ func (m *MeteredRWMutex) legacyObserver(location string) powerlock.LockObserver 
 }
 
 type legacyPrometheusObserver struct {
-	waiting prometheus.Gauge
-	held    prometheus.Gauge
-	mu      sync.Mutex
-	version uint64
+	waiting      prometheus.Gauge
+	held         prometheus.Gauge
+	mu           sync.Mutex
+	version      uint64
+	waitingCount int
+	heldCount    int
 }
 
 type legacyReadLocker struct {
@@ -184,12 +186,15 @@ func (o *legacyPrometheusObserver) ObserveLock(event powerlock.LockEvent) {
 		return
 	}
 	o.version = event.State.Version
-	o.waiting.Set(float64(event.State.WaitingReaders + event.State.WaitingWriters))
+	waiting := event.State.WaitingReaders + event.State.WaitingWriters
 	held := event.State.Readers
 	if event.State.Writer {
 		held++
 	}
-	o.held.Set(float64(held))
+	o.waiting.Add(float64(waiting - o.waitingCount))
+	o.held.Add(float64(held - o.heldCount))
+	o.waitingCount = waiting
+	o.heldCount = held
 }
 
 func (m *MeteredRWMutex) lockForOperation() *powerlock.ObservedRWMutex {
