@@ -208,3 +208,59 @@ func TestObservedRWMutex_RLockerUsesSharedOwnership(t *testing.T) {
 	}
 	reader.Unlock()
 }
+
+func TestObservedRWMutex_EventsKeepLockIdentity(t *testing.T) {
+	observer := newRecordingObserver()
+	m := NewObservedRWMutex("identity", observer)
+	m.Lock()
+	if m.TryRLock() {
+		m.RUnlock()
+		t.Fatal("expected read acquisition to fail while the writer holds the lock")
+	}
+	m.Unlock()
+	m.RLock()
+	m.RUnlock()
+	lockID := m.Snapshot().LockID
+	for _, event := range observer.snapshot() {
+		if event.State.LockID == 0 || event.State.LockID != lockID {
+			t.Fatalf("expected event identity=%d, got event=%+v", lockID, event)
+		}
+	}
+}
+
+func TestObservedRWMutex_ConcurrentSnapshotsHaveNonnegativeDurations(t *testing.T) {
+	for _, mode := range []LockMode{LockModeWrite, LockModeRead} {
+		t.Run(mode.String(), func(t *testing.T) {
+			m := NewObservedRWMutex("snapshot-durations", LockObserverFunc(func(LockEvent) {}))
+			acquire, release := m.Lock, m.Unlock
+			if mode == LockModeRead {
+				acquire, release = m.RLock, m.RUnlock
+			}
+			start := make(chan struct{})
+			var workers sync.WaitGroup
+			for range 4 {
+				workers.Add(1)
+				go func() {
+					defer workers.Done()
+					<-start
+					for range 10000 {
+						acquire()
+						release()
+					}
+				}()
+			}
+			close(start)
+			var invalidState LockState
+			for range 100000 {
+				state := m.Snapshot()
+				if state.WriterHoldDuration < 0 || state.ReaderCohortHoldDuration < 0 || state.OldestWaitDuration < 0 {
+					invalidState = state
+				}
+			}
+			workers.Wait()
+			if invalidState.LockID != 0 {
+				t.Fatalf("expected nonnegative durations during concurrent acquisitions, got %+v", invalidState)
+			}
+		})
+	}
+}

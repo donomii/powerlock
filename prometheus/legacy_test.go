@@ -13,6 +13,7 @@ package powerlockprometheus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -38,12 +39,12 @@ type legacyPausingGauge struct {
 	release chan struct{}
 }
 
-func (g *legacyPausingGauge) Set(value float64) {
+func (g *legacyPausingGauge) Add(value float64) {
 	g.once.Do(func() {
 		close(g.entered)
 		<-g.release
 	})
-	g.Gauge.Set(value)
+	g.Gauge.Add(value)
 }
 
 func TestMeteredRWMutex_BasicLockUnlock(t *testing.T) {
@@ -63,6 +64,69 @@ func TestMeteredRWMutex_BasicLockUnlock(t *testing.T) {
 		t.Fatalf("expected one held reader, got %v", got)
 	}
 	m.RUnlock()
+}
+
+func TestMeteredRWMutex_SharedLocationAggregatesHolders(t *testing.T) {
+	waiting, held := NewLockMetrics(prometheus.NewRegistry())
+	first := NewMeteredRWMutex("shared", waiting, held)
+	second := NewMeteredRWMutex("shared", waiting, held)
+	first.Lock()
+	second.RLock()
+	second.RLock()
+	if got := testutil.ToFloat64(held.WithLabelValues("shared")); got != 3 {
+		t.Errorf("expected one writer and two readers at shared location, got %g", got)
+	}
+	first.Unlock()
+	if got := testutil.ToFloat64(held.WithLabelValues("shared")); got != 2 {
+		t.Errorf("expected two readers after the other lock released its writer, got %g", got)
+	}
+	second.RUnlock()
+	second.RUnlock()
+	if got := testutil.ToFloat64(held.WithLabelValues("shared")); got != 0 {
+		t.Errorf("expected zero holders after all releases, got %g", got)
+	}
+}
+
+func TestMeteredRWMutex_SharedLocationAggregatesWaitingAndCancellation(t *testing.T) {
+	waiting, held := NewLockMetrics(prometheus.NewRegistry())
+	first := NewMeteredRWMutex("shared", waiting, held)
+	second := NewMeteredRWMutex("shared", waiting, held)
+	first.Lock()
+	second.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelled := make(chan error, 1)
+	acquired := make(chan error, 1)
+	go func() { cancelled <- first.LockContext(ctx) }()
+	go func() {
+		err := second.RLockContext(context.Background())
+		if err == nil {
+			second.RUnlock()
+		}
+		acquired <- err
+	}()
+	waitForMetricValue(t, func() float64 { return testutil.ToFloat64(waiting.WithLabelValues("shared")) }, 2)
+	cancel()
+	if err := <-cancelled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected first lock's queued writer to cancel, got %v", err)
+	}
+	if got := testutil.ToFloat64(waiting.WithLabelValues("shared")); got != 1 {
+		t.Errorf("expected second lock's reader to remain queued, got waiting=%g", got)
+	}
+	if got := testutil.ToFloat64(held.WithLabelValues("shared")); got != 2 {
+		t.Errorf("expected both writers to remain held after cancellation, got held=%g", got)
+	}
+	first.Unlock()
+	second.Unlock()
+	if err := <-acquired; err != nil {
+		t.Fatalf("expected second lock's reader to acquire, got %v", err)
+	}
+	if got := testutil.ToFloat64(waiting.WithLabelValues("shared")); got != 0 {
+		t.Errorf("expected no remaining waiters, got %g", got)
+	}
+	if got := testutil.ToFloat64(held.WithLabelValues("shared")); got != 0 {
+		t.Errorf("expected no remaining holders, got %g", got)
+	}
 }
 
 func TestMeteredRWMutex_TryLock_Succeeds(t *testing.T) {

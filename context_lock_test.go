@@ -175,6 +175,53 @@ func TestContextRWMutex_StateVersionIncreases(t *testing.T) {
 	}
 }
 
+func TestContextRWMutex_LockIdentityFollowsFirstUse(t *testing.T) {
+	first := NewContextRWMutex("identity")
+	second := NewContextRWMutex("identity")
+	if first.Snapshot().LockID != 0 || second.Snapshot().LockID != 0 {
+		t.Fatal("expected unused locks to have zero identities")
+	}
+	second.Lock()
+	secondID := second.Snapshot().LockID
+	second.Unlock()
+	if secondID == 0 || second.Snapshot().LockID != secondID {
+		t.Fatalf("expected stable nonzero identity after acquisition, got acquired=%d released=%d", secondID, second.Snapshot().LockID)
+	}
+	if !first.TryRLock() {
+		t.Fatal("expected first read acquisition to succeed")
+	}
+	firstID := first.Snapshot().LockID
+	first.RUnlock()
+	if firstID <= secondID || first.Snapshot().LockID != firstID {
+		t.Fatalf("expected later first use to receive a larger stable identity, got first=%d second=%d", firstID, secondID)
+	}
+}
+
+func TestContextRWMutex_RejectedAcquisitionGetsLockIdentity(t *testing.T) {
+	var m ContextRWMutex
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := m.LockContext(ctx)
+	var acquisitionErr *AcquisitionError
+	if !errors.As(err, &acquisitionErr) {
+		t.Fatalf("expected AcquisitionError, got %T: %v", err, err)
+	}
+	state := m.Snapshot()
+	if state.LockID == 0 || acquisitionErr.State.LockID != state.LockID || state.Version != 0 {
+		t.Fatalf("expected rejection to assign an identity without advancing state version, got state=%+v error=%+v", state, acquisitionErr)
+	}
+}
+
+func TestRWCore_PermanentCancellationGetsStableLockIdentity(t *testing.T) {
+	var m CancelRWMutex
+	m.Cancel()
+	state := m.Snapshot()
+	m.Cancel()
+	if state.LockID == 0 || m.Snapshot().LockID != state.LockID || !state.Cancelled {
+		t.Fatalf("expected cancellation to assign a stable nonzero identity, got first=%+v repeated=%+v", state, m.Snapshot())
+	}
+}
+
 func TestContextRWMutex_UnobservedQueuedHolderHasNoDurationReadout(t *testing.T) {
 	m := NewContextRWMutex("duration")
 	m.Lock()

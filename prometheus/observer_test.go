@@ -147,6 +147,54 @@ func TestObserver_IgnoresDelayedStaleState(t *testing.T) {
 	}
 }
 
+func TestObserver_ReplacementLockIgnoresRetiredState(t *testing.T) {
+	observer := MustNew(promclient.NewRegistry())
+	replacement := observer.NewObservedRWMutex("cache")
+	waitEvents := make(chan powerlock.LockEvent, 1)
+	retired := powerlock.NewObservedRWMutex("cache", powerlock.LockObserverGroup{
+		observer,
+		powerlock.LockObserverFunc(func(event powerlock.LockEvent) {
+			if event.Kind == powerlock.LockEventWaitStarted {
+				waitEvents <- event
+			}
+		}),
+	})
+	for range 3 {
+		retired.Lock()
+		retired.Unlock()
+	}
+	retired.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- retired.RLockContext(ctx) }()
+	delayed := <-waitEvents
+	cancel()
+	if err := <-result; err == nil {
+		t.Fatal("expected the retired lock's queued reader to be cancelled")
+	}
+	retired.Unlock()
+	replacement.RLock()
+	defer replacement.RUnlock()
+	if delayed.State.LockID >= replacement.Snapshot().LockID || delayed.State.Version <= replacement.Snapshot().Version {
+		t.Fatalf("expected an older lock with a newer version: retired=%+v replacement=%+v", delayed.State, replacement.Snapshot())
+	}
+	assertReplacementGauges(t, observer)
+	observer.ObserveLock(delayed)
+	assertReplacementGauges(t, observer)
+}
+
+func assertReplacementGauges(t *testing.T, observer *Observer) {
+	t.Helper()
+	readers := testutil.ToFloat64(observer.held.WithLabelValues("cache", "read"))
+	writers := testutil.ToFloat64(observer.held.WithLabelValues("cache", "write"))
+	waitingReaders := testutil.ToFloat64(observer.waiting.WithLabelValues("cache", "read"))
+	waitingWriters := testutil.ToFloat64(observer.waiting.WithLabelValues("cache", "write"))
+	if readers != 1 || writers != 0 || waitingReaders != 0 || waitingWriters != 0 {
+		t.Fatalf("replacement expected readers=1 writers=0 waiting_readers=0 waiting_writers=0; got %g %g %g %g", readers, writers, waitingReaders, waitingWriters)
+	}
+}
+
 func TestObserver_SerializesVersionAndGaugeUpdate(t *testing.T) {
 	held := &pausingGauge{
 		Gauge:   promclient.NewGauge(promclient.GaugeOpts{Name: "serialized_held"}),
@@ -161,7 +209,7 @@ func TestObserver_SerializesVersionAndGaugeUpdate(t *testing.T) {
 		waiting: promclient.NewGauge(promclient.GaugeOpts{Name: "serialized_write_waiting"}),
 		held:    held,
 	}
-	observer := &Observer{versions: make(map[string]uint64)}
+	observer := &Observer{versions: make(map[string]lockStateVersion)}
 	firstDone := make(chan struct{})
 	go func() {
 		observer.updateState("cache", powerlock.LockState{Version: 1, Writer: true}, readMetrics, writeMetrics)

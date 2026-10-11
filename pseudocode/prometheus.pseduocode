@@ -3,11 +3,12 @@ module prometheus observer
 data observer
     registered lock metric families
     cached metric handles by stable name and mode
+    latest accepted lock identity and state version by name
 
 operation receive lock event(event)
-    serialize version acceptance and gauge updates for the event lock name
-    if event state version is not older than the latest accepted version
-        record the version
+    serialize identity and version acceptance and gauge updates for the event lock name
+    if the lock identity is newer, or the same identity has a state version not older than the latest accepted version
+        record the lock identity and version
         set read waiter gauge from event state
         set write waiter gauge from event state
         set read holder gauge from event state
@@ -26,6 +27,12 @@ operation receive lock event(event)
         observe hold duration
     if hold threshold exceeded
         increment hold-threshold counter
+
+operation receive legacy lock event(event)
+    serialize version acceptance and contribution changes for this lock
+    ignore events older than this lock's latest accepted version
+    add changes in this lock's waiter and holder counts to the shared location gauges
+    retain the accepted version and counts for the next event
 
 operation bind metric handles(name, mode)
     return existing cached handles when present

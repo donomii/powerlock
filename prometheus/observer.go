@@ -25,6 +25,11 @@ type boundMetrics struct {
 	acquisitionByResult map[powerlock.LockResult]promclient.Counter
 }
 
+type lockStateVersion struct {
+	lockID  powerlock.LockID
+	version uint64
+}
+
 // Observer converts structured lock events into bounded Prometheus metrics.
 type Observer struct {
 	mu sync.Mutex
@@ -38,7 +43,7 @@ type Observer struct {
 	waitExceeded *promclient.CounterVec
 	holdExceeded *promclient.CounterVec
 	bound        map[metricKey]boundMetrics
-	versions     map[string]uint64
+	versions     map[string]lockStateVersion
 }
 
 // New registers an observer using Prometheus default duration buckets.
@@ -102,7 +107,7 @@ func NewWithBuckets(registerer promclient.Registerer, waitBuckets []float64, hol
 			Help:      "Exact lock acquisitions that exceeded the configured hold threshold.",
 		}, []string{"name", "mode"}),
 		bound:    make(map[metricKey]boundMetrics),
-		versions: make(map[string]uint64),
+		versions: make(map[string]lockStateVersion),
 	}
 
 	registrations := []metricRegistration{
@@ -196,10 +201,10 @@ func (o *Observer) updateState(name string, state powerlock.LockState, readMetri
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	current := o.versions[name]
-	if state.Version < current {
+	if state.LockID < current.lockID || state.LockID == current.lockID && state.Version < current.version {
 		return
 	}
-	o.versions[name] = state.Version
+	o.versions[name] = lockStateVersion{lockID: state.LockID, version: state.Version}
 	readMetrics.waiting.Set(float64(state.WaitingReaders))
 	readMetrics.held.Set(float64(state.Readers))
 	writeMetrics.waiting.Set(float64(state.WaitingWriters))
