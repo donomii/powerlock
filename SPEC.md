@@ -32,10 +32,11 @@ Unlocking without a matching acquisition panics with a message that identifies t
 
 `SetLocation` is a compatibility method for setting the lock name. It succeeds before first use and panics after first use. `Name` returns the current lock name.
 
-`Snapshot` returns a point-in-time view. Its durations are readouts, not timers:
+`Snapshot` returns a point-in-time view. Its elapsed durations are non-negative and measured against the state being read. They are readouts, not timers:
 
 - `Readers`: count of current read acquisitions.
-- `Version`: monotonically increasing state version used to reject delayed stale state reports.
+- `LockID`: process-wide lock identity assigned at first use, or zero before use. Use it to distinguish locks that reuse a name.
+- `Version`: monotonically increasing state version within one lock, used with `LockID` to reject delayed stale state reports.
 - `Writer`: whether a write acquisition is current.
 - `WaitingReaders`: count of queued readers.
 - `WaitingWriters`: count of queued writers.
@@ -45,6 +46,10 @@ Unlocking without a matching acquisition panics with a message that identifies t
 - `ReaderCohortHoldDuration`: duration since the first reader in the current cohort acquired when an observer is configured, or zero otherwise.
 
 ## Common data types
+
+### LockID
+
+`LockID` uniquely identifies a used lock within the process. Identities increase in first-use order and remain stable for the lock's lifetime. An unused lock has identity zero; copying a lock before first use does not share its eventual identity.
 
 ### LockMode
 
@@ -149,11 +154,13 @@ Powerlock does not start, stop, configure, snapshot, or store a runtime trace fl
 
 `KeyedMutex[K]` serializes acquisitions sharing a comparable key while allowing different keys to proceed independently.
 
+Keys must be comparable at runtime and equal to themselves. NaN values, keys containing NaN, and interface keys containing non-comparable values are rejected before an entry is created or capacity is consumed. `LockContext` and `LockGuard` return `KeyedAcquisitionError` wrapping `ErrInvalidConfig`; `TryLock` returns false and `Lock` panics with the error.
+
 `DefaultMaxKeys` is 1024. `NewKeyedMutex` and the zero value use that default. `NewKeyedMutexWithLimit` requires a positive maximum. The maximum counts keys with a holder or waiter. A key entry is removed after its final holder or waiter exits.
 
 `LockContext` returns `KeyedAcquisitionError` wrapping `ErrMaxKeys` when adding a new referenced key would exceed the maximum. The error includes the lock name, key, maximum, active count, and underlying cause. Keys are not automatically copied into metric labels.
 
-A nil, already-cancelled, or already-expired context is rejected before a key entry is created or referenced. Context failure therefore takes precedence over active-key capacity.
+A nil, already-cancelled, or already-expired context is rejected before a key entry is created or referenced. Context failure therefore takes precedence over invalid keys and active-key capacity. Cancellation and deadline errors include the current state of an existing key, including ownership and queue counts.
 
 `LockGuard` returns `KeyGuard`, which pairs release with its key and acquisition identifier. `Key`, `AttemptID`, and `Released` describe the guard. `ActiveKeys`, `MaxKeys`, `Name`, and `Snapshot` describe the keyed lock.
 
@@ -187,15 +194,15 @@ Package `github.com/donomii/powerlock/prometheus` registers these metrics:
 - `powerlock_wait_threshold_exceeded_total{name,mode}`: wait threshold counter.
 - `powerlock_hold_threshold_exceeded_total{name,mode}`: exact hold threshold counter.
 
-Names must be stable and drawn from a bounded set. Modes and results are fixed enumerations. Acquisition identifiers and call stacks never become labels.
+Names must be stable and drawn from a bounded set. Modes and results are fixed enumerations. Lock identities, acquisition identifiers, and call stacks never become labels.
 
-Each simultaneously live observed lock should have a unique name. This lets state-version filtering prevent delayed events from restoring stale gauges.
+Each simultaneously live observed lock should have a unique name. A replacement lock may reuse a retired lock's name. Its newer `LockID` starts a fresh version sequence for state gauges; delayed events from older lock identities cannot overwrite that state. Within one identity, older versions cannot overwrite newer versions. Events with identity zero retain version filtering for callers supplying their own events.
 
-Version acceptance and all four state-gauge updates are serialized so a paused older event cannot overwrite gauges from a newer event.
+Identity and version acceptance and all four state-gauge updates are serialized so a paused older event cannot overwrite gauges from a newer event.
 
 `New` uses the Prometheus default duration buckets. `NewWithBuckets` accepts finite, positive, strictly increasing bucket boundaries expressed in seconds. `MustNew` panics on registration failure. Convenience constructors attach the observer to observed or watchdog locks.
 
-The adapter package also contains `MeteredRWMutex`, `NewLockMetrics`, and `RegisterLockMetrics` for migration from the original aggregate gauges. These compatibility names are not exported by the core package.
+The adapter package also contains `MeteredRWMutex`, `NewLockMetrics`, and `RegisterLockMetrics` for migration from the original aggregate gauges. Locks sharing a location and gauge vectors contribute to the same total waiter and holder counts. Releasing one lock removes only its contribution; delayed older events from that lock do not change the totals. These compatibility names are not exported by the core package.
 
 ## Unsupported behavior
 

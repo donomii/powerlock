@@ -15,7 +15,7 @@ var (
 	ErrMaxKeys = errors.New("powerlock: maximum keyed locks reached")
 	// ErrMaxWaiting identifies an acquisition rejected by a MaxRWMutex waiter limit.
 	ErrMaxWaiting = errors.New("powerlock: maximum waiting acquisitions reached")
-	// ErrInvalidConfig identifies an invalid constructor value or forbidden post-use reconfiguration.
+	// ErrInvalidConfig identifies an invalid constructor value, invalid keyed-lock key, or post-use reconfiguration.
 	ErrInvalidConfig = errors.New("powerlock: invalid configuration")
 )
 

@@ -12,6 +12,7 @@ import (
 const unlimitedWaiters = -1
 
 var nextLockAttemptID atomic.Uint64
+var nextLockID atomic.Uint64
 
 type readLockable interface {
 	RLock()
@@ -91,6 +92,7 @@ type rwCore struct {
 	mu             sync.Mutex
 	name           string
 	used           bool
+	lockID         LockID
 	version        uint64
 	readers        int
 	writer         bool
@@ -147,6 +149,13 @@ func (c *rwCore) nameValue() string {
 	return c.name
 }
 
+func (c *rwCore) markUsedLocked() {
+	if !c.used {
+		c.lockID = LockID(nextLockID.Add(1))
+		c.used = true
+	}
+}
+
 func (c *rwCore) acquire(ctx context.Context, mode LockMode, maxWaiting int, guarded bool) (LockAttemptID, error) {
 	if ctx == nil {
 		c.mu.Lock()
@@ -156,7 +165,7 @@ func (c *rwCore) acquire(ctx context.Context, mode LockMode, maxWaiting int, gua
 	}
 
 	c.mu.Lock()
-	c.used = true
+	c.markUsedLocked()
 	observed := c.observer != nil
 	now := time.Time{}
 	attemptID := LockAttemptID(0)
@@ -256,7 +265,7 @@ func (c *rwCore) acquire(ctx context.Context, mode LockMode, maxWaiting int, gua
 
 func (c *rwCore) tryAcquire(mode LockMode, guarded bool) (LockAttemptID, bool) {
 	c.mu.Lock()
-	c.used = true
+	c.markUsedLocked()
 	observed := c.observer != nil
 	now := time.Time{}
 	attemptID := LockAttemptID(0)
@@ -309,7 +318,7 @@ func (c *rwCore) release(mode LockMode, attemptID LockAttemptID) {
 	}
 	c.mu.Lock()
 	pendingBeforeRelease := c.pendingAcquired
-	c.used = true
+	c.markUsedLocked()
 	observed := c.observer != nil
 	now := time.Time{}
 	if observed || len(c.waiters) > 0 {
@@ -418,9 +427,9 @@ func (c *rwCore) release(mode LockMode, attemptID LockAttemptID) {
 }
 
 func (c *rwCore) cancel() {
-	now := time.Now()
 	c.mu.Lock()
-	c.used = true
+	now := time.Now()
+	c.markUsedLocked()
 	if c.cancelled {
 		c.mu.Unlock()
 		return
@@ -446,10 +455,9 @@ func (c *rwCore) isCancelled() bool {
 }
 
 func (c *rwCore) snapshot() LockState {
-	now := time.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.snapshotLocked(now)
+	return c.snapshotLocked(time.Now())
 }
 
 func (c *rwCore) canAcquireImmediatelyLocked(mode LockMode) bool {
@@ -565,8 +573,8 @@ func (c *rwCore) grantWaiterLocked(waiter *rwWaiter, now time.Time) {
 }
 
 func (c *rwCore) cancelWaiter(waiter *rwWaiter, cause error) {
-	now := time.Now()
 	c.mu.Lock()
+	now := time.Now()
 	if waiter.finished {
 		c.mu.Unlock()
 		return
@@ -694,8 +702,8 @@ func (c *rwCore) completeAcquiredDelivery() {
 func (c *rwCore) reportWaitExceeded(waiter *rwWaiter) {
 	waiter.reportMu.Lock()
 	defer waiter.reportMu.Unlock()
-	now := time.Now()
 	c.mu.Lock()
+	now := time.Now()
 	if waiter.finished || waiter.waitReported {
 		c.mu.Unlock()
 		return
@@ -718,8 +726,8 @@ func (c *rwCore) reportHoldExceeded(mode LockMode, attemptID LockAttemptID) {
 	if report.reported {
 		return
 	}
-	now := time.Now()
 	c.mu.Lock()
+	now := time.Now()
 	acquiredAt := time.Time{}
 	callers := []uintptr(nil)
 	switch mode {
@@ -803,6 +811,7 @@ func (c *rwCore) captureCallersLocked() []uintptr {
 func (c *rwCore) snapshotLocked(now time.Time) LockState {
 	state := LockState{
 		Name:      c.name,
+		LockID:    c.lockID,
 		Version:   c.version,
 		Readers:   c.readers,
 		Writer:    c.writer,

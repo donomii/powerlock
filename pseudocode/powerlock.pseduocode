@@ -2,12 +2,18 @@ module powerlock
 
 data lock state
     stable name
+    process-wide identity increasing in first-use order, zero before use
+    state version increasing within this lock
     active reader count
     active writer state
     FIFO waiter sequence
     permanent cancellation state
     observer and diagnostic thresholds
     current exact acquisition timing
+
+operation read lock state(lock)
+    return ownership, queue, identity, and version from one point in time
+    measure non-negative elapsed durations against that same state
 
 operation format lock event(event)
     render event kind, stable name, mode, result, contention, wait and measurable hold duration
@@ -85,6 +91,8 @@ operation try acquire(lock, mode)
 
 operation acquire keyed lock(keyed lock, key, context)
     reject a missing, cancelled, or expired context before referencing a key entry
+    include the current state of an existing key in cancellation and deadline errors
+    reject a key that is not comparable at runtime or is not equal to itself
     find or create the entry for key
     if a new entry would exceed the active-key maximum
         return a keyed capacity error

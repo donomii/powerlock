@@ -3,8 +3,12 @@ package powerlock
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
+	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestKeyedMutex_DifferentKeysDoNotBlock(t *testing.T) {
@@ -298,5 +302,151 @@ func TestKeyedMutex_SameKeyHandoffRetainsDistinctKeyCapacity(t *testing.T) {
 	m.Unlock("account-b")
 	if m.ActiveKeys() != 0 {
 		t.Fatalf("expected complete keyed cleanup, active=%d", m.ActiveKeys())
+	}
+}
+
+func TestKeyedMutex_RejectsNonReflexiveKeys(t *testing.T) {
+	t.Run("float64", func(t *testing.T) {
+		checkKeyedMutexRejectsInvalidKey(t, math.NaN(), float64(7))
+	})
+	t.Run("float32", func(t *testing.T) {
+		checkKeyedMutexRejectsInvalidKey(t, float32(math.NaN()), float32(7))
+	})
+	t.Run("complex real", func(t *testing.T) {
+		checkKeyedMutexRejectsInvalidKey(t, complex(math.NaN(), 0), complex(7, 0))
+	})
+	t.Run("complex imaginary", func(t *testing.T) {
+		checkKeyedMutexRejectsInvalidKey(t, complex64(complex(0, math.NaN())), complex64(7))
+	})
+	t.Run("struct", func(t *testing.T) {
+		type key struct{ value float64 }
+		checkKeyedMutexRejectsInvalidKey(t, key{math.NaN()}, key{7})
+	})
+	t.Run("array", func(t *testing.T) {
+		checkKeyedMutexRejectsInvalidKey(t, [1]float64{math.NaN()}, [1]float64{7})
+	})
+	t.Run("nested complex", func(t *testing.T) {
+		type key struct{ values [2]complex128 }
+		checkKeyedMutexRejectsInvalidKey(t, key{[2]complex128{0, complex(0, math.NaN())}}, key{})
+	})
+}
+
+func TestKeyedMutex_RejectsNonComparableDynamicKeys(t *testing.T) {
+	checkKeyedMutexRejectsInvalidKey[fmt.Stringer](t, net.IPv4(127, 0, 0, 1), nil)
+	type key struct{ address fmt.Stringer }
+	checkKeyedMutexRejectsInvalidKey(t, key{net.IPv4(127, 0, 0, 1)}, key{})
+}
+
+func checkKeyedMutexRejectsInvalidKey[K comparable](t *testing.T, invalidKey, validKey K) {
+	t.Helper()
+	for _, occupied := range []bool{false, true} {
+		m := NewKeyedMutexWithLimit[K]("invalid-keys", 1)
+		expectedActive := 0
+		if occupied {
+			m.Lock(validKey)
+			expectedActive = 1
+		}
+		assertInvalidKeyAcquisitions(t, m, invalidKey, expectedActive)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := m.LockContext(ctx, invalidKey); !errors.Is(err, context.Canceled) || errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("expected context cancellation before invalid-key rejection, got %v", err)
+		}
+		if guard, err := m.LockGuard(ctx, invalidKey); guard != nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context cancellation without a guard, guard=%v err=%v", guard, err)
+		}
+		message := panicText(t, func() { m.LockContext(nil, invalidKey) })
+		if !strings.Contains(message, "requires a non-nil context") {
+			t.Fatalf("expected nil-context rejection before invalid-key rejection, got %s", message)
+		}
+		message = panicText(t, func() { m.LockGuard(nil, invalidKey) })
+		if !strings.Contains(message, "requires a non-nil context") {
+			t.Fatalf("expected nil-context guard rejection before invalid-key rejection, got %s", message)
+		}
+		if active := m.ActiveKeys(); active != expectedActive {
+			t.Fatalf("invalid key changed capacity: expected=%d received=%d", expectedActive, active)
+		}
+		if occupied {
+			m.Unlock(validKey)
+		}
+		if !m.TryLock(validKey) {
+			t.Fatal("invalid key prevented a valid key from acquiring available capacity")
+		}
+		m.Unlock(validKey)
+		if active := m.ActiveKeys(); active != 0 {
+			t.Fatalf("expected complete keyed cleanup, active=%d", active)
+		}
+	}
+}
+
+func assertInvalidKeyAcquisitions[K comparable](t *testing.T, m *KeyedMutex[K], key K, expectedActive int) {
+	t.Helper()
+	err := m.LockContext(context.Background(), key)
+	var keyedErr *KeyedAcquisitionError[K]
+	if !errors.Is(err, ErrInvalidConfig) || !errors.As(err, &keyedErr) {
+		t.Fatalf("expected typed invalid-key error, got %v", err)
+	}
+	if keyedErr.Name != "invalid-keys" || keyedErr.MaxKeys != 1 || keyedErr.ActiveKeys != expectedActive {
+		t.Fatalf("invalid-key error omitted capacity or identity: %+v", keyedErr)
+	}
+	if guard, err := m.LockGuard(context.Background(), key); guard != nil || !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("expected invalid-key error without a guard, guard=%v err=%v", guard, err)
+	}
+	if m.TryLock(key) {
+		t.Fatal("expected invalid key to reject TryLock")
+	}
+	message := panicText(t, func() { m.Lock(key) })
+	if !strings.Contains(message, ErrInvalidConfig.Error()) || !strings.Contains(message, "equal to themselves") {
+		t.Fatalf("blocking invalid-key panic omitted its cause: %s", message)
+	}
+}
+
+func TestKeyedMutex_PreCancelledContextReportsExistingKeyState(t *testing.T) {
+	m := NewKeyedMutex[string]("accounts")
+	m.Lock("held")
+	defer m.Unlock("held")
+	waiterContext, cancelWaiter := context.WithCancel(context.Background())
+	defer cancelWaiter()
+	waiterResult := make(chan error, 1)
+	go func() {
+		err := m.LockContext(waiterContext, "held")
+		if err == nil {
+			m.Unlock("held")
+		}
+		waiterResult <- err
+	}()
+	waitForLockState(t, func() LockState {
+		state, _ := m.Snapshot("held")
+		return state
+	}, func(state LockState) bool { return state.WaitingWriters == 1 })
+	before, _ := m.Snapshot("held")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancelExpired()
+	for _, ctx := range []context.Context{cancelled, expired} {
+		for _, guarded := range []bool{false, true} {
+			var err error
+			if guarded {
+				_, err = m.LockGuard(ctx, "held")
+			} else {
+				err = m.LockContext(ctx, "held")
+			}
+			var acquisitionErr *AcquisitionError
+			if !errors.Is(err, ctx.Err()) || !errors.As(err, &acquisitionErr) {
+				t.Fatalf("expected typed context error, guarded=%t err=%v", guarded, err)
+			}
+			state := acquisitionErr.State
+			if state.Name != before.Name || state.Version != before.Version || !state.Writer || state.WaitingWriters != 1 {
+				t.Fatalf("context error omitted held-key state: before=%+v received=%+v", before, state)
+			}
+			if state.OldestWaitDuration < before.OldestWaitDuration || !strings.Contains(err.Error(), "writer=true") {
+				t.Fatalf("context error lost wait duration or held state: before=%+v received=%+v err=%v", before, state, err)
+			}
+		}
+	}
+	cancelWaiter()
+	if err := <-waiterResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected queued acquisition cancellation, got %v", err)
 	}
 }

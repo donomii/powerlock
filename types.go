@@ -51,9 +51,13 @@ const (
 // LockAttemptID uniquely identifies one acquisition attempt within the process.
 type LockAttemptID uint64
 
+// LockID identifies a lock within the process, increasing with first use; zero identifies an unused lock.
+type LockID uint64
+
 // LockState is a point-in-time view of a lock.
 type LockState struct {
 	Name                     string
+	LockID                   LockID
 	Version                  uint64
 	Readers                  int
 	Writer                   bool
